@@ -19,6 +19,7 @@ declare global {
       openImage: () => Promise<OpenDialogReturnValue>;
       registerLocalFile: (filePath: string) => Promise<string>;
       getPathForFile: (file: File) => string;
+      copyImageToClipboard: (imageBytes: Uint8Array | ArrayBuffer) => void;
       getAppVersion: () => Promise<string>;
     };
   }

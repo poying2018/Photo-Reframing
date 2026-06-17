@@ -34,6 +34,8 @@ export const fileAPI = {
     window.electronAPI.registerLocalFile(filePath),
   getPathForFile: (file: File): string =>
     window.electronAPI.getPathForFile(file),
+  copyImageToClipboard: (imageBytes: Uint8Array | ArrayBuffer): void =>
+    window.electronAPI.copyImageToClipboard(imageBytes),
 };
 
 export const appAPI = {

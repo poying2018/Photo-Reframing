@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import { clipboard, contextBridge, ipcRenderer, nativeImage, webUtils } from 'electron';
 import {
   IPC_APP_GET_VERSION,
   IPC_FILE_OPEN_IMAGE,
@@ -32,6 +32,14 @@ const api = {
   registerLocalFile: (filePath: string) =>
     ipcRenderer.invoke(IPC_FILE_REGISTER_LOCAL, filePath),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
+  copyImageToClipboard: (imageBytes: Uint8Array | ArrayBuffer) => {
+    const bytes = imageBytes instanceof Uint8Array ? imageBytes : new Uint8Array(imageBytes);
+    const image = nativeImage.createFromBuffer(Buffer.from(bytes));
+    if (image.isEmpty()) {
+      throw new Error('无法从截图数据创建剪贴板图片');
+    }
+    clipboard.writeImage(image);
+  },
 
   getAppVersion: () => ipcRenderer.invoke(IPC_APP_GET_VERSION),
 };

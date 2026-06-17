@@ -8,12 +8,14 @@ export class ResultUI {
   private comparisonContainer: HTMLElement;
   private originalImg: HTMLImageElement;
   private processedImg: HTMLImageElement;
+  private title: HTMLElement;
 
   constructor() {
     this.container = this.createContainer();
     this.comparisonContainer = this.container.querySelector('#comparison-view')!;
     this.originalImg = this.container.querySelector('#result-original') as HTMLImageElement;
     this.processedImg = this.container.querySelector('#result-processed') as HTMLImageElement;
+    this.title = this.container.querySelector('#result-title')!;
     this.mount();
   }
 
@@ -24,7 +26,7 @@ export class ResultUI {
     el.id = 'result-panel';
     el.innerHTML = `
       <div class="result-header">
-        <h3>处理结果</h3>
+        <h3 id="result-title">处理结果</h3>
         <button id="result-close" class="result-close-btn">&times;</button>
       </div>
       <div id="comparison-view" class="comparison-view">
@@ -49,14 +51,16 @@ export class ResultUI {
     });
   }
 
-  showResult(imageBlob: Blob): void {
+  showResult(imageBlob: Blob, title = '处理结果'): void {
     const url = URL.createObjectURL(imageBlob);
+    this.title.textContent = title;
     this.processedImg.src = url;
     this.comparisonContainer.classList.add('single');
     this.container.style.display = '';
   }
 
-  showComparison(original: Blob, processed: Blob): void {
+  showComparison(original: Blob, processed: Blob, title = '处理结果'): void {
+    this.title.textContent = title;
     this.originalImg.src = URL.createObjectURL(original);
     this.processedImg.src = URL.createObjectURL(processed);
     this.comparisonContainer.classList.remove('single');

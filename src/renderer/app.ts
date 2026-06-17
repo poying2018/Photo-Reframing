@@ -27,6 +27,26 @@ let externalApiConfig: ExternalApiConfig = {
 };
 let pendingReferenceImageUrl: string | null = null;
 
+async function copyBlobToClipboard(blob: Blob): Promise<void> {
+  const copyImageToClipboard = window.electronAPI?.copyImageToClipboard;
+  if (typeof copyImageToClipboard === 'function') {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    copyImageToClipboard(bytes);
+    return;
+  }
+
+  const clipboardWrite = navigator.clipboard?.write;
+  const ClipboardItemCtor = window.ClipboardItem;
+  if (typeof clipboardWrite === 'function' && typeof ClipboardItemCtor === 'function') {
+    await clipboardWrite.call(navigator.clipboard, [
+      new ClipboardItemCtor({ [blob.type || 'image/png']: blob }),
+    ]);
+    return;
+  }
+
+  throw new Error('当前窗口的剪贴板 API 不可用，请重启应用后再试');
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   // 初始化状态管理
   appStore.initialize();
@@ -82,6 +102,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     appStore.dispatch({ type: 'SET_INPUT_IMAGE', path: imagePath });
     appStore.dispatch({ type: 'SET_PHASE', phase: 'inferring' });
 
+    resultUI.clear();
     uploadUI.setEnabled(false);
     progressUI.show('正在推理中...');
     appEvents.emit(Events.INFERENCE_START, imagePath);
@@ -161,8 +182,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 截图完成 → 发送至外部 API
   appEvents.on(Events.CAPTURE_COMPLETE, async (blob: Blob) => {
     if (!externalApiConfig.url) {
-      // 没有配置外部 API，仅保存截图
-      resultUI.showResult(blob);
+      try {
+        await copyBlobToClipboard(blob);
+        resultUI.showResult(blob, '截图已复制到剪贴板');
+      } catch (err) {
+        resultUI.showResult(blob, '截图已生成，复制失败');
+        appEvents.emit(Events.APP_ERROR, {
+          code: 'FILE_WRITE_ERROR',
+          message: '截图复制失败',
+          detail: String(err),
+        });
+      }
       return;
     }
 
@@ -171,7 +201,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     try {
       const processedBlob = await sendToExternalAPI(blob, externalApiConfig);
-      resultUI.showComparison(blob, processedBlob);
+      try {
+        await copyBlobToClipboard(processedBlob);
+        resultUI.showComparison(blob, processedBlob, '处理结果已复制到剪贴板');
+      } catch {
+        resultUI.showComparison(blob, processedBlob);
+      }
       appEvents.emit(Events.EXTERNAL_API_RESULT, processedBlob);
     } catch (err) {
       appEvents.emit(Events.EXTERNAL_API_ERROR, {
@@ -198,6 +233,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 设置面板
   appEvents.on('settings:open', () => {
     settingsUI.open();
+  });
+
+  appEvents.on(Events.UPLOAD_REQUESTED, () => {
+    resultUI.clear();
   });
 
   settingsUI.onApply((settings) => {

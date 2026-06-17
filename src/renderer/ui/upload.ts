@@ -91,6 +91,16 @@ export class UploadUI {
         }
       }
     });
+
+    appEvents.on(Events.UPLOAD_REQUESTED, () => {
+      this.openPicker();
+    });
+  }
+
+  openPicker(): void {
+    this.setEnabled(true);
+    this.fileInput.value = '';
+    this.fileInput.click();
   }
 
   private handleFile(file: File): void {

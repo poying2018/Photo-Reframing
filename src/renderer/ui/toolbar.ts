@@ -28,6 +28,9 @@ export class ToolbarUI {
       <button id="btn-reset" class="toolbar-btn" title="重置视角">
         🔄 重置视角
       </button>
+      <button id="btn-reupload" class="toolbar-btn" title="重新上传图片">
+        重新上传
+      </button>
       <div class="toolbar-spacer"></div>
       <button id="btn-settings" class="toolbar-btn" title="设置">
         ⚙️ 设置
@@ -46,6 +49,12 @@ export class ToolbarUI {
     this.container.querySelector('#btn-reset')?.addEventListener('click', () => {
       if (this.enabled) {
         appEvents.emit('viewer:reset');
+      }
+    });
+
+    this.container.querySelector('#btn-reupload')?.addEventListener('click', () => {
+      if (this.enabled) {
+        appEvents.emit(Events.UPLOAD_REQUESTED);
       }
     });
 

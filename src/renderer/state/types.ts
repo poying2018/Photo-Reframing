@@ -12,6 +12,7 @@ export const Events = {
   MODEL_DOWNLOAD_PROGRESS: 'model:download-progress',
   CAPTURE_REQUESTED: 'capture:requested',
   CAPTURE_COMPLETE: 'capture:complete',
+  UPLOAD_REQUESTED: 'upload:requested',
   EXTERNAL_API_RESULT: 'external:api-result',
   EXTERNAL_API_ERROR: 'external:api-error',
   APP_ERROR: 'app:error',

@@ -133,7 +133,7 @@ export class ViewerUI {
 
   async setReferenceImage(imagePath: string): Promise<void> {
     this.overlayImage.src = await this.resolveReferenceImageUrl(imagePath);
-    this.calibrationSettings.referenceVisible = true;
+    this.calibrationSettings.referenceVisible = false;
     this.syncCalibration();
   }
 
@@ -319,7 +319,6 @@ export class ViewerUI {
     });
     panel.querySelector('[data-calibration-reset]')?.addEventListener('click', () => {
       this.calibrationSettings = this.createDefaultCalibrationSettings();
-      this.calibrationSettings.referenceVisible = Boolean(this.overlayImage.src);
       this.autoModelOffsetCompensation.set(0, 0, 0);
       this.syncCalibration();
     });
