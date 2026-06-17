@@ -108,6 +108,7 @@ export class ViewerUI {
     this.resizeObserver = new ResizeObserver(() => {
       const { width, height } = this.container.getBoundingClientRect();
       this.sceneManager?.resize(width, height);
+      this.syncViewportClip();
     });
     this.resizeObserver.observe(this.container);
     this.applyCalibration();
@@ -139,6 +140,7 @@ export class ViewerUI {
   frameToImage(image: InferenceImageInfo): void {
     this.sourceImage = image;
     this.updateAutoModelScale();
+    this.syncViewportClip();
     this.applyCalibration();
     this.syncCalibrationForm();
     this.syncCalibrationReport();
@@ -444,9 +446,35 @@ export class ViewerUI {
     this.overlayImage.style.transform =
       `translate(calc(-50% + ${s.referenceOffsetX}vw), calc(-50% + ${s.referenceOffsetY}vh)) rotate(${s.referenceRotation}deg) scale(${s.referenceScale})`;
 
+    this.syncViewportClip();
     this.applyCalibration();
     this.syncCalibrationForm();
     this.syncCalibrationReport();
+  }
+
+  private syncViewportClip(): void {
+    this.sceneManager?.setCanvasClipRect(this.computeReferenceClipRect());
+  }
+
+  private computeReferenceClipRect(): { left: number; top: number; width: number; height: number } | null {
+    const image = this.sourceImage;
+    if (!image) return null;
+
+    const viewport = this.container.getBoundingClientRect();
+    if (viewport.width <= 0 || viewport.height <= 0) return null;
+
+    const size = this.getReferenceImageDisplaySize(image, viewport.width, viewport.height);
+    const width = size.width * this.calibrationSettings.referenceScale;
+    const height = size.height * this.calibrationSettings.referenceScale;
+    const centerX = viewport.width / 2 + (this.calibrationSettings.referenceOffsetX / 100) * viewport.width;
+    const centerY = viewport.height / 2 + (this.calibrationSettings.referenceOffsetY / 100) * viewport.height;
+
+    return {
+      left: centerX - width / 2,
+      top: centerY - height / 2,
+      width,
+      height,
+    };
   }
 
   private syncRenderSettingsToCalibration(settings?: Partial<RenderSettings>): void {
@@ -676,6 +704,23 @@ export class ViewerUI {
     viewportHeight: number,
   ): { width: number; height: number } {
     const scale = Math.min(viewportWidth / image.width, viewportHeight / image.height);
+    return {
+      width: image.width * scale,
+      height: image.height * scale,
+    };
+  }
+
+  private getReferenceImageDisplaySize(
+    image: InferenceImageInfo,
+    viewportWidth: number,
+    viewportHeight: number,
+  ): { width: number; height: number } {
+    if (this.calibrationSettings.referenceFitMode === 'stretch') {
+      return { width: viewportWidth, height: viewportHeight };
+    }
+    const scale = this.calibrationSettings.referenceFitMode === 'cover'
+      ? Math.max(viewportWidth / image.width, viewportHeight / image.height)
+      : Math.min(viewportWidth / image.width, viewportHeight / image.height);
     return {
       width: image.width * scale,
       height: image.height * scale,

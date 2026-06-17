@@ -99,16 +99,26 @@ export class CameraController {
   private rotateAroundPivot(deltaX: number, deltaY: number, pivot: THREE.Vector3): void {
     const sensitivity = 0.005;
     const camera = this.controls.object;
-    const upAxis = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
-    const rightAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
+    const upAxis = new THREE.Vector3(...DEFAULT_CAMERA_UP).normalize();
+    const viewOffset = camera.position.clone().sub(pivot);
+    const rightAxis = new THREE.Vector3().crossVectors(upAxis, viewOffset).normalize();
+    if (rightAxis.lengthSq() < 1e-8) return;
     const yaw = new THREE.Quaternion().setFromAxisAngle(upAxis, -deltaX * sensitivity);
-    const pitch = new THREE.Quaternion().setFromAxisAngle(rightAxis, -deltaY * sensitivity);
+    const pitchAmount = this.clampPitchDelta(viewOffset, upAxis, -deltaY * sensitivity);
+    const pitch = new THREE.Quaternion().setFromAxisAngle(rightAxis, pitchAmount);
     const rotation = yaw.multiply(pitch);
 
-    camera.position.sub(pivot).applyQuaternion(rotation).add(pivot);
+    camera.position.copy(viewOffset.applyQuaternion(rotation).add(pivot));
     this.controls.target.sub(pivot).applyQuaternion(rotation).add(pivot);
-    camera.up.applyQuaternion(rotation).normalize();
+    camera.up.set(...DEFAULT_CAMERA_UP);
     this.controls.update();
+  }
+
+  private clampPitchDelta(viewOffset: THREE.Vector3, upAxis: THREE.Vector3, requestedDelta: number): number {
+    const polar = Math.acos(THREE.MathUtils.clamp(viewOffset.clone().normalize().dot(upAxis), -1, 1));
+    const minPolar = 0.01;
+    const maxPolar = Math.PI - 0.01;
+    return THREE.MathUtils.clamp(requestedDelta, minPolar - polar, maxPolar - polar);
   }
 
   reset(): void {

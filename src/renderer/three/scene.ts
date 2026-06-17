@@ -79,6 +79,20 @@ export class SceneManager {
     return this.renderer.domElement;
   }
 
+  setCanvasClipRect(rect: { left: number; top: number; width: number; height: number } | null): void {
+    const canvas = this.renderer.domElement;
+    if (!rect) {
+      canvas.style.clipPath = '';
+      return;
+    }
+    const bounds = canvas.getBoundingClientRect();
+    const left = Math.max(0, rect.left);
+    const top = Math.max(0, rect.top);
+    const right = Math.max(0, bounds.width - rect.left - rect.width);
+    const bottom = Math.max(0, bounds.height - rect.top - rect.height);
+    canvas.style.clipPath = `inset(${top}px ${right}px ${bottom}px ${left}px)`;
+  }
+
   getRenderer(): THREE.WebGLRenderer {
     return this.renderer;
   }
