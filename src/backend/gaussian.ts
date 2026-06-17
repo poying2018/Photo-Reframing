@@ -72,6 +72,20 @@ export function pruneGaussians(
   const maxGaussians = Number.isFinite(options.maxGaussians)
     ? Math.max(0, Math.floor(options.maxGaussians!))
     : maxGaussiansForPreset(preset);
+  if (threshold <= 0 && maxGaussians === 0) {
+    return {
+      totalCount,
+      pruned: {
+        count: totalCount,
+        meanVectors,
+        singularValues,
+        quaternions,
+        colors,
+        opacities,
+      },
+    };
+  }
+
   const selected: number[] = [];
 
   for (let i = 0; i < totalCount; i++) {

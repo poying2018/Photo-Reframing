@@ -29,7 +29,7 @@ export const DEFAULT_CAMERA_UP: [number, number, number] = [0, 1, 0];
 export const DEFAULT_EXTERNAL_API_TIMEOUT = 30000;
 
 // ---- 推理质量 ----
-export const DEFAULT_OPACITY_THRESHOLD = 0.02;
+export const DEFAULT_OPACITY_THRESHOLD = 0;
 export const DEFAULT_MAX_GAUSSIANS_BALANCED = 200000;
 export const DEFAULT_MAX_GAUSSIANS_HIGH = 500000;
 export const DEFAULT_SPLAT_ALPHA_REMOVAL_THRESHOLD = 0;

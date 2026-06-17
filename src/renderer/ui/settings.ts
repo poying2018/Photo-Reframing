@@ -16,9 +16,9 @@ import {
 import type { ViewerSettings } from '../../shared/types';
 
 export const defaultViewerSettings: ViewerSettings = {
-  qualityPreset: 'high',
+  qualityPreset: 'full',
   opacityThreshold: DEFAULT_OPACITY_THRESHOLD,
-  maxGaussians: DEFAULT_MAX_GAUSSIANS_HIGH,
+  maxGaussians: 0,
   focalPxOverride: null,
   splatAlphaRemovalThreshold: DEFAULT_SPLAT_ALPHA_REMOVAL_THRESHOLD,
   splatScale: DEFAULT_SPLAT_SCALE,
@@ -171,9 +171,13 @@ export class SettingsUI {
     if (qualityPreset instanceof HTMLSelectElement) qualityPreset.addEventListener('change', () => {
       const preset = qualityPreset.value;
       const maxInput = this.form.elements.namedItem('maxGaussians') as HTMLInputElement;
+      const opacityInput = this.form.elements.namedItem('opacityThreshold') as HTMLInputElement;
       if (preset === 'balanced') maxInput.value = String(DEFAULT_MAX_GAUSSIANS_BALANCED);
       if (preset === 'high') maxInput.value = String(DEFAULT_MAX_GAUSSIANS_HIGH);
-      if (preset === 'full') maxInput.value = '0';
+      if (preset === 'full') {
+        maxInput.value = '0';
+        opacityInput.value = '0';
+      }
     });
     this.form.addEventListener('input', () => this.syncFromForm());
     this.form.addEventListener('change', () => this.syncFromForm());
