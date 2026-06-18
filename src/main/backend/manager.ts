@@ -17,9 +17,11 @@ import { getModelCacheDir, getOutputDir } from '../utils/paths';
 import { ONNX_MODEL_FILENAME } from '../../shared/constants';
 import { registerLocalFile, registerOutputFile } from '../protocol/output';
 import { logger } from '../utils/logger';
+import { RuntimeOutputCache } from './output-cache';
 
 interface PendingTask {
   inputImagePath: string;
+  cacheKey: string;
   resolve: (result: InferenceResult) => void;
   reject: (error: AppError) => void;
 }
@@ -51,6 +53,7 @@ export class BackendManager {
   private activeTaskId: string | null = null;
   private pendingTasks = new Map<string, PendingTask>();
   private pendingCapabilities = new Map<string, (capabilities: RuntimeCapabilities) => void>();
+  private readonly outputCache = new RuntimeOutputCache();
 
   constructor(private readonly onStatus: (status: InferenceStatus) => void) {}
 
@@ -65,12 +68,36 @@ export class BackendManager {
 
     const taskId = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     this.activeTaskId = taskId;
+
+    let cacheKey: string;
+    try {
+      cacheKey = await this.outputCache.getKey(request);
+    } catch (error) {
+      this.activeTaskId = null;
+      return {
+        code: 'FILE_READ_ERROR',
+        message: '读取输入图片失败',
+        detail: String(error),
+      };
+    }
+
+    const cached = this.outputCache.get(cacheKey);
+    if (cached) {
+      logger.info(`命中本次运行模型缓存: ${request.imagePath}`);
+      const plyUrl = registerOutputFile(cached.plyPath);
+      const referenceImageUrl = registerLocalFile(request.imagePath);
+      this.onStatus({ taskId, stage: 'ready', progress: 100, message: 'Ready (cached)', backend: cached.backend });
+      this.activeTaskId = null;
+      return { ...cached, taskId, plyUrl, referenceImageUrl };
+    }
+
     this.ensureProcess();
     this.onStatus({ taskId, stage: 'queued', progress: 0, message: 'Queued' });
 
     return new Promise<InferenceResult | AppError>((resolve) => {
       this.pendingTasks.set(taskId, {
         inputImagePath: request.imagePath,
+        cacheKey,
         resolve: (result) => resolve(result),
         reject: (error) => resolve(error),
       });
@@ -105,6 +132,7 @@ export class BackendManager {
     this.child?.kill();
     this.child = null;
     this.activeTaskId = null;
+    this.outputCache.clear();
   }
 
   private createRunConfig(): BackendRunConfig {
@@ -153,6 +181,8 @@ export class BackendManager {
       const pending = this.pendingTasks.get(message.taskId);
       this.pendingTasks.delete(message.taskId);
       this.activeTaskId = null;
+      const { taskId: _taskId, ...cacheableResult } = message.result;
+      if (pending) this.outputCache.set(pending.cacheKey, cacheableResult);
       const plyUrl = registerOutputFile(message.result.plyPath);
       const referenceImageUrl = pending ? registerLocalFile(pending.inputImagePath) : undefined;
       pending?.resolve({ ...message.result, plyUrl, referenceImageUrl });

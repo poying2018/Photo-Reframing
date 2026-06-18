@@ -158,6 +158,7 @@ export interface ExternalApiConfig {
 
 export type ReconstructionProvider = 'kie';
 export type ReconstructionModel = 'gpt-image-2' | 'seedream-5-lite' | 'nano-banana-2';
+export type ReconstructionInputMode = 'single' | 'dual';
 export type ReconstructionResolution = '2K' | '4K';
 export type WindowControlAction = 'minimize' | 'toggle-maximize' | 'close';
 
@@ -178,6 +179,7 @@ export interface ViewerSettings {
   fov: number;
   reconstructionProvider: ReconstructionProvider;
   reconstructionModel: ReconstructionModel;
+  reconstructionInputMode: ReconstructionInputMode;
   kieApiKey: string;
   reconstructionResolution: ReconstructionResolution;
 }

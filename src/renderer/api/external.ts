@@ -3,17 +3,54 @@
 // ============================================================
 
 import type {
+  ReconstructionInputMode,
   ReconstructionModel,
   ReconstructionProvider,
   ReconstructionResolution,
 } from '../../shared/types';
+import {
+  RECONSTRUCTION_REPAIR_MASK_COLOR,
+  RECONSTRUCTION_USE_REPAIR_MASK_CAPTURE,
+} from '../../shared/constants';
 
 const KIE_API_BASE_URL = 'https://api.kie.ai';
 const KIE_FILE_BASE_URL = 'https://kieai.redpandaai.co';
 const KIE_MAX_POLL_MS = 15 * 60 * 1000;
+const REPAIR_MASK_PROMPT =
+  `Bright magenta regions (${RECONSTRUCTION_REPAIR_MASK_COLOR}) are repair masks, not real scene content. Remove every mask-colored area completely and reconstruct those marked regions naturally. Treat marked areas as the highest-priority damage regions.`;
 
-export const RECONSTRUCTION_PROMPT =
-  '修复图片边缘的模糊和瑕疵，恢复丢失的细节，适当矫正畸变扭曲，保持总体的角度构图不变';
+export const SINGLE_IMAGE_RECONSTRUCTION_PROMPT =
+  [
+    'This image is a target preview render from the current viewer. Use it as the output view. Keep its exact camera angle, perspective, crop, composition, object placement, scale, lighting feel, and scene layout.',
+    ...(RECONSTRUCTION_USE_REPAIR_MASK_CAPTURE ? [REPAIR_MASK_PROMPT] : []),
+    'Repair only abnormal artifacts caused by the 3D preview or rendering process: warped or melted shapes, smeared textures, noisy splat fragments, floating dots, holes, broken contours, ghosting, patchy opacity, jagged edges, translucent fragments, and distorted surface details.',
+    'Pay special attention to Gaussian splat view-change artifacts: stretched or torn edges, shredded contours, fibrous pull-apart shapes, rubbery smearing, surface tearing, texture dragging, duplicated edge fragments, and details that look ripped apart when the viewpoint changes. Repair these areas into coherent natural surfaces and clean object boundaries.',
+    'Do not treat normal photographic blur as damage. Preserve background bokeh, depth-of-field blur, motion blur, soft focus, and naturally low-detail areas unless they contain obvious rendering artifacts.',
+    ...(RECONSTRUCTION_USE_REPAIR_MASK_CAPTURE
+      ? ['Preserve natural photographic blur unless it is inside or directly connected to a bright magenta repair mask.']
+      : []),
+    'Only repair blur that looks like a rendering artifact: warped, stretched, dirty, duplicated, patchy, broken, or structurally inconsistent.',
+    'Preserve all correct parts. Do not stylize, beautify, redesign, replace the background, add new objects, remove real objects, or invent unsupported details.',
+    'When uncertain, preserve the image rather than creating new detail. Return a clean, realistic version of the same view with rendering artifacts repaired and the natural photographic character preserved.',
+  ].join('\n\n');
+
+export const DUAL_IMAGE_RECONSTRUCTION_PROMPT =
+  [
+    'Image 1 is the target preview render from the current viewer. Use Image 1 as the output view. Keep its exact camera angle, perspective, crop, composition, object placement, scale, lighting feel, and scene layout.',
+    'Image 2 is the original uploaded photo. Use Image 2 only as a reference for the true appearance: colors, materials, textures, object boundaries, natural photographic blur, and missing or unclear details.',
+    ...(RECONSTRUCTION_USE_REPAIR_MASK_CAPTURE ? [REPAIR_MASK_PROMPT] : []),
+    'Repair only abnormal artifacts in Image 1 caused by the 3D preview or rendering process: warped or melted shapes, smeared textures, noisy splat fragments, floating dots, holes, broken contours, ghosting, patchy opacity, jagged edges, translucent fragments, and distorted surface details.',
+    'Pay special attention to Gaussian splat view-change artifacts in Image 1: stretched or torn edges, shredded contours, fibrous pull-apart shapes, rubbery smearing, surface tearing, texture dragging, duplicated edge fragments, and details that look ripped apart when the viewpoint changes. Use Image 2 only to infer how those damaged surfaces, textures, and boundaries should look.',
+    'Do not treat normal photographic blur as damage. Preserve background bokeh, depth-of-field blur, motion blur, soft focus, and naturally low-detail areas when they are consistent with Image 2.',
+    ...(RECONSTRUCTION_USE_REPAIR_MASK_CAPTURE
+      ? ['Preserve natural photographic blur unless it is inside or directly connected to a bright magenta repair mask. Use Image 2 to reconstruct marked areas with plausible original color, texture, boundary, and blur behavior.']
+      : []),
+    'Only repair blur that looks like a rendering artifact: warped, stretched, dirty, duplicated, patchy, broken, or inconsistent with the structure shown in Image 2.',
+    'Preserve all correct parts of Image 1. Do not use the viewpoint of Image 2. Do not stylize, beautify, redesign, replace the background, add new objects, remove real objects, or invent unsupported details.',
+    'When uncertain, preserve Image 1 rather than creating new detail. Return a clean, realistic version of Image 1 with rendering artifacts repaired and the natural photographic character preserved.',
+  ].join('\n\n');
+
+export const RECONSTRUCTION_PROMPT = DUAL_IMAGE_RECONSTRUCTION_PROMPT;
 
 type KieAspectRatio =
   | 'auto'
@@ -44,7 +81,7 @@ type KieModelConfig = {
   supportedAspectRatios: KieAspectRatio[];
   buildInput: (input: {
     prompt: string;
-    imageUrl: string;
+    imageUrls: string[];
     aspectRatio: KieAspectRatio;
     resolution: ReconstructionResolution;
   }) => Record<string, unknown>;
@@ -53,6 +90,7 @@ type KieModelConfig = {
 type ReconstructionRequest = {
   provider: ReconstructionProvider;
   model: ReconstructionModel;
+  inputMode: ReconstructionInputMode;
   apiKey: string;
   gaussianBlob: Blob;
   referenceBlob: Blob;
@@ -125,9 +163,9 @@ const KIE_MODEL_CONFIGS: Record<ReconstructionModel, KieModelConfig> = {
     label: 'GPT Image 2',
     apiModel: 'gpt-image-2-image-to-image',
     supportedAspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
-    buildInput: ({ prompt, imageUrl, aspectRatio, resolution }) => ({
+    buildInput: ({ prompt, imageUrls, aspectRatio, resolution }) => ({
       prompt,
-      input_urls: [imageUrl],
+      input_urls: imageUrls,
       aspect_ratio: aspectRatio,
       resolution,
     }),
@@ -137,9 +175,9 @@ const KIE_MODEL_CONFIGS: Record<ReconstructionModel, KieModelConfig> = {
     label: 'Seedream 5.0 Lite',
     apiModel: 'seedream/5-lite-image-to-image',
     supportedAspectRatios: ['1:1', '4:3', '3:4', '16:9', '9:16', '2:3', '3:2', '21:9'],
-    buildInput: ({ prompt, imageUrl, aspectRatio, resolution }) => ({
+    buildInput: ({ prompt, imageUrls, aspectRatio, resolution }) => ({
       prompt,
-      image_urls: [imageUrl],
+      image_urls: imageUrls,
       aspect_ratio: aspectRatio === 'auto' ? '1:1' : aspectRatio,
       quality: resolution === '4K' ? 'high' : 'basic',
     }),
@@ -149,13 +187,13 @@ const KIE_MODEL_CONFIGS: Record<ReconstructionModel, KieModelConfig> = {
     label: 'Nano Banana 2',
     apiModel: 'nano-banana-2',
     supportedAspectRatios: ['auto', '1:1', '1:4', '16:9', '1:8', '21:9', '2:3', '3:2', '3:4', '4:1', '4:3', '4:5', '5:4', '8:1', '9:16'],
-    buildInput: ({ prompt, imageUrl, aspectRatio, resolution }) => ({
+    buildInput: ({ prompt, imageUrls, aspectRatio, resolution }) => ({
       prompt,
       aspect_ratio: aspectRatio,
       resolution,
       output_format: 'jpg',
       google_search: false,
-      image_input: [imageUrl],
+      image_input: imageUrls,
     }),
   },
 };
@@ -184,17 +222,25 @@ async function reconstructWithKie(request: ReconstructionRequest): Promise<Blob>
   }
 
   const modelConfig = KIE_MODEL_CONFIGS[request.model] ?? KIE_MODEL_CONFIGS['gpt-image-2'];
-  const gaussianInput = await normalizeUploadImage(request.gaussianBlob, 'sharp-viewer-gaussian.png');
+  const gaussianInput = await normalizeUploadImage(request.gaussianBlob, 'sharp-viewer-gaussian.jpg');
+  const aspectRatioPromise = pickClosestAspectRatio(gaussianInput.blob, modelConfig.supportedAspectRatios);
+  const gaussianUrlPromise = uploadKieFile(gaussianInput.blob, gaussianInput.fileName, apiKey);
+  const prompt =
+    request.inputMode === 'dual' ? DUAL_IMAGE_RECONSTRUCTION_PROMPT : SINGLE_IMAGE_RECONSTRUCTION_PROMPT;
 
-  const [gaussianUrl, aspectRatio] = await Promise.all([
-    uploadKieFile(gaussianInput.blob, gaussianInput.fileName, apiKey),
-    pickClosestAspectRatio(gaussianInput.blob, modelConfig.supportedAspectRatios),
-  ]);
+  const [gaussianUrl, aspectRatio] = await Promise.all([gaussianUrlPromise, aspectRatioPromise]);
+  const imageUrls = [gaussianUrl];
+
+  if (request.inputMode === 'dual') {
+    const referenceInput = await normalizeUploadImage(request.referenceBlob, 'sharp-viewer-reference.png');
+    imageUrls.push(await uploadKieFile(referenceInput.blob, referenceInput.fileName, apiKey));
+  }
 
   const taskId = await createKieTask({
     apiKey,
     modelConfig,
-    gaussianUrl,
+    prompt,
+    imageUrls,
     aspectRatio,
     resolution: request.resolution,
   });
@@ -262,25 +308,29 @@ async function uploadKieFile(blob: Blob, fileName: string, apiKey: string): Prom
 async function createKieTask(input: {
   apiKey: string;
   modelConfig: KieModelConfig;
-  gaussianUrl: string;
+  prompt: string;
+  imageUrls: string[];
   aspectRatio: KieAspectRatio;
   resolution: ReconstructionResolution;
 }): Promise<string> {
+  const requestBody = {
+    model: input.modelConfig.apiModel,
+    input: input.modelConfig.buildInput({
+      prompt: input.prompt,
+      imageUrls: input.imageUrls,
+      aspectRatio: input.aspectRatio,
+      resolution: input.resolution,
+    }),
+  };
+  console.info('[KIE createTask request]', JSON.stringify(requestBody, null, 2));
+
   const response = await fetch(`${KIE_API_BASE_URL}/api/v1/jobs/createTask`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${input.apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model: input.modelConfig.apiModel,
-      input: input.modelConfig.buildInput({
-        prompt: RECONSTRUCTION_PROMPT,
-        imageUrl: input.gaussianUrl,
-        aspectRatio: input.aspectRatio,
-        resolution: input.resolution,
-      }),
-    }),
+    body: JSON.stringify(requestBody),
   });
   const data = await readJson<KieCreateTaskResponse>(response);
   const taskId = data.data?.taskId;

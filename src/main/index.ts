@@ -5,6 +5,7 @@ import { BackendManager } from './backend/manager';
 import { broadcastInferenceStatus } from './ipc/inference';
 import { registerOutputProtocol } from './protocol/output';
 import { logger } from './utils/logger';
+import { clearGeneratedOutputFiles } from './backend/output-cache';
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -23,6 +24,7 @@ let backendManager: BackendManager | null = null;
 
 app.whenReady().then(async () => {
   try {
+    clearGeneratedOutputFiles();
     registerOutputProtocol();
     backendManager = new BackendManager(broadcastInferenceStatus);
     registerAllHandlers(backendManager);
@@ -40,6 +42,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   backendManager?.dispose();
+  clearGeneratedOutputFiles();
 });
 
 app.on('activate', async () => {

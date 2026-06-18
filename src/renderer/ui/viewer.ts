@@ -17,6 +17,9 @@ import {
   DEFAULT_CAMERA_UP,
   DEFAULT_MAX_SCREEN_SPACE_SPLAT_SIZE,
   DEFAULT_SPLAT_SCALE,
+  RECONSTRUCTION_CAPTURE_MIME_TYPE,
+  RECONSTRUCTION_CAPTURE_QUALITY,
+  RECONSTRUCTION_USE_REPAIR_MASK_CAPTURE,
   DEFAULT_VIEWER_BACKGROUND,
   DEFAULT_VIEWER_FOV,
 } from '../../shared/constants';
@@ -190,7 +193,20 @@ export class ViewerUI {
     if (!this.sceneManager) {
       throw new Error('场景未初始化');
     }
-    return captureViewport(this.sceneManager.getRenderer());
+
+    const captureOptions = {
+      mimeType: RECONSTRUCTION_CAPTURE_MIME_TYPE,
+      quality: RECONSTRUCTION_CAPTURE_QUALITY,
+    };
+
+    if (!RECONSTRUCTION_USE_REPAIR_MASK_CAPTURE) {
+      return captureViewport(this.sceneManager.getRenderer(), captureOptions);
+    }
+
+    this.sceneManager.renderCurrentFrame('repair-mask');
+    const blob = await captureViewport(this.sceneManager.getRenderer(), captureOptions);
+    this.sceneManager.renderCurrentFrame('blur-fill');
+    return blob;
   }
 
   private bindEvents(): void {

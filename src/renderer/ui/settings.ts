@@ -95,6 +95,7 @@ export const defaultViewerSettings: ViewerSettings = {
   fov: DEFAULT_VIEWER_FOV,
   reconstructionProvider: 'kie',
   reconstructionModel: persisted.reconstructionModel ?? 'gpt-image-2',
+  reconstructionInputMode: 'single',
   kieApiKey: persisted.kieApiKey ?? '',
   reconstructionResolution: persisted.reconstructionResolution ?? '2K',
 };
@@ -225,6 +226,7 @@ export class SettingsUI {
         ...this.settings,
         kieApiKey: '',
         reconstructionModel: 'gpt-image-2',
+        reconstructionInputMode: 'single',
         reconstructionResolution: '2K',
       };
       this.syncForm();
@@ -265,6 +267,7 @@ export class SettingsUI {
       ...this.settings,
       reconstructionProvider: 'kie',
       reconstructionModel: normalizeReconstructionModel(model),
+      reconstructionInputMode: 'single',
       kieApiKey: (this.form.elements.namedItem('kieApiKey') as HTMLInputElement).value.trim(),
       reconstructionResolution: resolution === '4K' ? '4K' : '2K',
     };
@@ -358,10 +361,11 @@ export class SettingsUI {
     const nativeSelect = this.form.elements.namedItem(config.formName) as HTMLSelectElement | null;
     if (nativeSelect) nativeSelect.value = value;
     if (label) {
-      label.textContent =
-        config.key === 'model'
-          ? getReconstructionModelLabel(value as ReconstructionModel)
-          : config.options.find((option) => option.value === value)?.label ?? value;
+      if (config.key === 'model') {
+        label.textContent = getReconstructionModelLabel(value as ReconstructionModel);
+      } else {
+        label.textContent = config.options.find((option) => option.value === value)?.label ?? value;
+      }
     }
 
     this.container.querySelectorAll<HTMLButtonElement>(`[data-select-option="${config.key}"]`).forEach((option) => {

@@ -11,9 +11,11 @@ import {
   DEFAULT_CAMERA_LOOK_AT,
   DEFAULT_CAMERA_UP,
   DEFAULT_MAX_SCREEN_SPACE_SPLAT_SIZE,
+  RECONSTRUCTION_REPAIR_MASK_COLOR,
   DEFAULT_VIEWER_BACKGROUND,
   DEFAULT_VIEWER_FOV,
 } from '../../shared/constants';
+import type { EdgeFillRenderMode } from './edge-fill-pass';
 
 export class SceneManager {
   private renderer: THREE.WebGLRenderer;
@@ -23,6 +25,7 @@ export class SceneManager {
   private camera: THREE.PerspectiveCamera;
   private frameCallbacks = new Set<() => void>();
   private drawingBufferSize = new THREE.Vector2();
+  private edgeFillRenderMode: EdgeFillRenderMode = 'blur-fill';
 
   constructor(container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -46,6 +49,7 @@ export class SceneManager {
       focalAdjustment: 1,
     });
     this.edgeFillPass = new EdgeFillPass(this.renderer, DEFAULT_VIEWER_BACKGROUND);
+    this.edgeFillPass.setRepairMaskColor(RECONSTRUCTION_REPAIR_MASK_COLOR);
     this.syncPostProcessSize();
 
     this.scene = new THREE.Scene();
@@ -70,7 +74,7 @@ export class SceneManager {
     const animate = (): void => {
       requestAnimationFrame(animate);
       this.frameCallbacks.forEach((callback) => callback());
-      this.edgeFillPass.render(this.scene, this.camera, this.sparkRenderer);
+      this.renderCurrentFrame();
     };
     animate();
   }
@@ -125,6 +129,14 @@ export class SceneManager {
     this.scene.background = new THREE.Color(color);
     this.renderer.setClearColor(color, 1);
     this.edgeFillPass.setBackground(color);
+  }
+
+  setEdgeFillRenderMode(mode: EdgeFillRenderMode): void {
+    this.edgeFillRenderMode = mode;
+  }
+
+  renderCurrentFrame(mode = this.edgeFillRenderMode): void {
+    this.edgeFillPass.render(this.scene, this.camera, this.sparkRenderer, mode);
   }
 
   setFov(fov: number): void {

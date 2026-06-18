@@ -22,7 +22,10 @@ export class CameraController {
   private raycaster = new THREE.Raycaster();
   private pointer = new THREE.Vector2();
   private rotatePivot: THREE.Vector3 | null = null;
+  private rotateVelocity = new THREE.Vector2();
   private lastPointer: { x: number; y: number; pointerId: number } | null = null;
+  private readonly rotateSensitivity = 0.005;
+  private readonly rotateStopThreshold = 0.01;
   private preventContextMenu = (event: MouseEvent): void => event.preventDefault();
   private handlePointerDown = (event: PointerEvent): void => {
     if (event.button !== 0) return;
@@ -30,6 +33,7 @@ export class CameraController {
     event.stopImmediatePropagation();
 
     this.rotatePivot = this.pickPivot(event) ?? this.controls.target.clone();
+    this.rotateVelocity.set(0, 0);
     this.lastPointer = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
     this.renderer.domElement.setPointerCapture(event.pointerId);
     this.renderer.domElement.addEventListener('pointermove', this.handlePointerMove);
@@ -46,15 +50,17 @@ export class CameraController {
     this.lastPointer.y = event.clientY;
     if (dx === 0 && dy === 0) return;
 
-    this.rotateAroundPivot(dx, dy, this.rotatePivot);
+    this.rotateVelocity.x += dx;
+    this.rotateVelocity.y += dy;
   };
   private handlePointerUp = (event: PointerEvent): void => {
     if (!this.lastPointer || event.pointerId !== this.lastPointer.pointerId) return;
-    this.renderer.domElement.releasePointerCapture(event.pointerId);
+    if (this.renderer.domElement.hasPointerCapture(event.pointerId)) {
+      this.renderer.domElement.releasePointerCapture(event.pointerId);
+    }
     this.renderer.domElement.removeEventListener('pointermove', this.handlePointerMove);
     this.renderer.domElement.removeEventListener('pointerup', this.handlePointerUp);
     this.renderer.domElement.removeEventListener('pointercancel', this.handlePointerUp);
-    this.rotatePivot = null;
     this.lastPointer = null;
   };
 
@@ -97,14 +103,13 @@ export class CameraController {
   }
 
   private rotateAroundPivot(deltaX: number, deltaY: number, pivot: THREE.Vector3): void {
-    const sensitivity = 0.005;
     const camera = this.controls.object;
     const upAxis = new THREE.Vector3(...DEFAULT_CAMERA_UP).normalize();
     const viewOffset = camera.position.clone().sub(pivot);
     const rightAxis = new THREE.Vector3().crossVectors(upAxis, viewOffset).normalize();
     if (rightAxis.lengthSq() < 1e-8) return;
-    const yaw = new THREE.Quaternion().setFromAxisAngle(upAxis, -deltaX * sensitivity);
-    const pitchAmount = this.clampPitchDelta(viewOffset, upAxis, -deltaY * sensitivity);
+    const yaw = new THREE.Quaternion().setFromAxisAngle(upAxis, -deltaX * this.rotateSensitivity);
+    const pitchAmount = this.clampPitchDelta(viewOffset, upAxis, -deltaY * this.rotateSensitivity);
     const pitch = new THREE.Quaternion().setFromAxisAngle(rightAxis, pitchAmount);
     const rotation = yaw.multiply(pitch);
 
@@ -112,6 +117,32 @@ export class CameraController {
     this.controls.target.sub(pivot).applyQuaternion(rotation).add(pivot);
     camera.up.set(...DEFAULT_CAMERA_UP);
     this.controls.update();
+  }
+
+  private updatePivotRotation(): void {
+    if (!this.rotatePivot) {
+      this.rotateVelocity.set(0, 0);
+      return;
+    }
+
+    const damping = this.controls.dampingFactor;
+    if (this.rotateVelocity.lengthSq() <= this.rotateStopThreshold * this.rotateStopThreshold) {
+      this.rotateVelocity.set(0, 0);
+      if (!this.lastPointer) this.rotatePivot = null;
+      return;
+    }
+
+    this.rotateAroundPivot(
+      this.rotateVelocity.x * damping,
+      this.rotateVelocity.y * damping,
+      this.rotatePivot
+    );
+    this.rotateVelocity.multiplyScalar(1 - damping);
+  }
+
+  private stopPivotRotation(): void {
+    this.rotatePivot = null;
+    this.rotateVelocity.set(0, 0);
   }
 
   private clampPitchDelta(viewOffset: THREE.Vector3, upAxis: THREE.Vector3, requestedDelta: number): number {
@@ -122,6 +153,7 @@ export class CameraController {
   }
 
   reset(): void {
+    this.stopPivotRotation();
     const state = this.homeState;
     this.controls.object.position.set(...(state?.position ?? DEFAULT_CAMERA_POSITION));
     this.controls.object.up.set(...DEFAULT_CAMERA_UP);
@@ -132,6 +164,7 @@ export class CameraController {
   }
 
   frameSourceCamera(options?: { imageWidth?: number; imageHeight?: number; focalPx?: number }): void {
+    this.stopPivotRotation();
     const perspectiveCamera = this.controls.object as THREE.PerspectiveCamera;
     if (perspectiveCamera.isPerspectiveCamera && options?.imageHeight && options.focalPx) {
       const photoFov = THREE.MathUtils.radToDeg(2 * Math.atan(options.imageHeight / (2 * options.focalPx)));
@@ -156,6 +189,7 @@ export class CameraController {
     cameraTargetZ: number;
     cameraFov: number;
   }): void {
+    this.stopPivotRotation();
     const camera = this.controls.object as THREE.PerspectiveCamera;
     camera.position.set(settings.cameraPositionX, settings.cameraPositionY, settings.cameraPositionZ);
     if (camera.isPerspectiveCamera) {
@@ -204,6 +238,7 @@ export class CameraController {
   }
 
   setCameraState(state: CameraState): void {
+    this.stopPivotRotation();
     this.controls.object.position.set(...state.position);
     this.controls.target.set(...state.target);
     (this.controls.object as any).zoom = state.zoom;
@@ -212,6 +247,7 @@ export class CameraController {
 
   update(): void {
     this.controls.update();
+    this.updatePivotRotation();
   }
 
   private saveHomeState(): void {
@@ -227,7 +263,11 @@ export class CameraController {
 
   dispose(): void {
     this.renderer.domElement.removeEventListener('pointerdown', this.handlePointerDown, { capture: true });
+    this.renderer.domElement.removeEventListener('pointermove', this.handlePointerMove);
+    this.renderer.domElement.removeEventListener('pointerup', this.handlePointerUp);
+    this.renderer.domElement.removeEventListener('pointercancel', this.handlePointerUp);
     this.renderer.domElement.removeEventListener('contextmenu', this.preventContextMenu);
+    this.stopPivotRotation();
     this.controls.dispose();
   }
 }

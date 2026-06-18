@@ -21,6 +21,8 @@ const NEAR_BLUR_PX = 6;
 const FAR_BLUR_PX = 56;
 const PROPAGATION_STEPS_PX = [128, 96, 64, 40, 24, 14, 8, 4, 2, 1, 1];
 
+export type EdgeFillRenderMode = 'blur-fill' | 'repair-mask';
+
 export class EdgeFillPass {
   private renderer: THREE.WebGLRenderer;
   private sceneTarget: THREE.WebGLRenderTarget;
@@ -32,6 +34,7 @@ export class EdgeFillPass {
   private renderSize = new THREE.Vector2(1, 1);
   private fillSize = new THREE.Vector2(1, 1);
   private backgroundColor = new THREE.Color();
+  private repairMaskColor = new THREE.Color(0xff00ff);
   private scratchColor = new THREE.Color();
 
   constructor(renderer: THREE.WebGLRenderer, backgroundColor: string) {
@@ -74,7 +77,17 @@ export class EdgeFillPass {
     this.compositeMaterial.uniforms.uBackgroundColor.value.copy(this.backgroundColor);
   }
 
-  render(scene: THREE.Scene, camera: THREE.Camera, sparkRenderer: SparkRenderer): void {
+  setRepairMaskColor(color: string): void {
+    this.repairMaskColor.set(color);
+    this.compositeMaterial.uniforms.uRepairMaskColor.value.copy(this.repairMaskColor);
+  }
+
+  render(
+    scene: THREE.Scene,
+    camera: THREE.Camera,
+    sparkRenderer: SparkRenderer,
+    mode: EdgeFillRenderMode = 'blur-fill'
+  ): void {
     this.renderSceneToTransparentTarget(scene, camera, sparkRenderer);
 
     let readTarget = this.seedFillTarget();
@@ -90,6 +103,8 @@ export class EdgeFillPass {
     this.compositeMaterial.uniforms.uSceneTexture.value = this.sceneTarget.texture;
     this.compositeMaterial.uniforms.uFillTexture.value = readTarget.texture;
     this.compositeMaterial.uniforms.uBackgroundColor.value.copy(this.backgroundColor);
+    this.compositeMaterial.uniforms.uRepairMaskColor.value.copy(this.repairMaskColor);
+    this.compositeMaterial.uniforms.uRepairMaskMode.value = mode === 'repair-mask' ? 1 : 0;
     this.renderFullscreen(this.compositeMaterial, null);
   }
 
@@ -210,6 +225,7 @@ export class EdgeFillPass {
         uFillTexelSize: { value: new THREE.Vector2(1, 1) },
         uBackgroundColor: { value: this.backgroundColor.clone() },
         uAlphaThreshold: { value: ALPHA_THRESHOLD },
+        uSeedAlphaThreshold: { value: SEED_ALPHA_THRESHOLD },
         uEdgeErodePx: { value: EDGE_ERODE_PX },
         uEdgeFeatherPx: { value: EDGE_FEATHER_PX },
         uEdgeKeepAlpha: { value: EDGE_KEEP_ALPHA },
@@ -217,6 +233,8 @@ export class EdgeFillPass {
         uFillFullConfidence: { value: FILL_FULL_CONFIDENCE },
         uNearBlurPx: { value: NEAR_BLUR_PX },
         uFarBlurPx: { value: FAR_BLUR_PX },
+        uRepairMaskMode: { value: 0 },
+        uRepairMaskColor: { value: this.repairMaskColor.clone() },
       },
       vertexShader: FULLSCREEN_VERTEX_SHADER,
       fragmentShader: COMPOSITE_FRAGMENT_SHADER,
@@ -368,6 +386,7 @@ uniform vec2 uSceneTexelSize;
 uniform vec2 uFillTexelSize;
 uniform vec3 uBackgroundColor;
 uniform float uAlphaThreshold;
+uniform float uSeedAlphaThreshold;
 uniform float uEdgeErodePx;
 uniform float uEdgeFeatherPx;
 uniform float uEdgeKeepAlpha;
@@ -375,6 +394,8 @@ uniform float uFillMinConfidence;
 uniform float uFillFullConfidence;
 uniform float uNearBlurPx;
 uniform float uFarBlurPx;
+uniform int uRepairMaskMode;
+uniform vec3 uRepairMaskColor;
 
 varying vec2 vUv;
 
@@ -481,6 +502,13 @@ void main() {
   float detailKeep = smoothstep(0.72, 0.98, sceneKeep);
   vec3 edgeCleanRgb = mix(fillRgb, sceneRgb, detailKeep);
   vec3 color = edgeCleanRgb * effectiveAlpha + (1.0 - effectiveAlpha) * behind;
+  if (uRepairMaskMode == 1) {
+    float rawCoverage = smoothstep(uAlphaThreshold, uEdgeKeepAlpha, scene.a);
+    float sparseCoverageMask = (1.0 - rawCoverage) * smoothstep(0.001, uFillFullConfidence, fill.a);
+    float strongHoleMask = smoothstep(uFillMinConfidence, uFillFullConfidence, fill.a) * (1.0 - smoothstep(uAlphaThreshold, uSeedAlphaThreshold, scene.a));
+    float repairMask = clamp(max(sparseCoverageMask * 0.72, strongHoleMask), 0.0, 1.0);
+    color = mix(color, uRepairMaskColor, repairMask);
+  }
   gl_FragColor = vec4(color, 1.0);
 }
 `;

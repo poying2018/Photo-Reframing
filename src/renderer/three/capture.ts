@@ -5,7 +5,10 @@
 
 import type { WebGLRenderer } from 'three';
 
-export function captureViewport(renderer: WebGLRenderer): Promise<Blob> {
+export function captureViewport(
+  renderer: WebGLRenderer,
+  options: { mimeType?: string; quality?: number } = {}
+): Promise<Blob> {
   return new Promise((resolve, reject) => {
     renderer.domElement.toBlob(
       (blob) => {
@@ -15,8 +18,8 @@ export function captureViewport(renderer: WebGLRenderer): Promise<Blob> {
           reject(new Error('截图失败：Canvas 为空'));
         }
       },
-      'image/png',
-      1.0
+      options.mimeType ?? 'image/png',
+      options.quality ?? 1.0
     );
   });
 }

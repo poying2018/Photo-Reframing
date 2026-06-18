@@ -27,6 +27,10 @@ export const DEFAULT_CAMERA_UP: [number, number, number] = [0, 1, 0];
 
 // ---- 外部 API ----
 export const DEFAULT_EXTERNAL_API_TIMEOUT = 30000;
+export const RECONSTRUCTION_USE_REPAIR_MASK_CAPTURE = true;
+export const RECONSTRUCTION_REPAIR_MASK_COLOR = '#ff00ff';
+export const RECONSTRUCTION_CAPTURE_MIME_TYPE = 'image/jpeg';
+export const RECONSTRUCTION_CAPTURE_QUALITY = 0.9;
 
 // ---- 推理质量 ----
 export const DEFAULT_OPACITY_THRESHOLD = 0;
