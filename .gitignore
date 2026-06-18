@@ -9,3 +9,4 @@ models/*.onnx.data
 参考/
 test/
 .eb-cache/
+release-full/

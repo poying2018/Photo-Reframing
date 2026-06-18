@@ -1,11 +1,12 @@
 const includeModels = process.env.INCLUDE_MODELS === 'true';
+const outputDir = process.env.BUILD_OUTPUT_DIR || (includeModels ? 'release-full' : 'release');
 
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
   appId: 'com.sharpviewer.app',
   productName: 'Photo Reframing',
   directories: {
-    output: 'release',
+    output: outputDir,
     buildResources: 'assets',
   },
   files: ['dist/**/*', 'package.json'],
@@ -34,12 +35,15 @@ module.exports = {
     target: ['portable'],
     icon: 'assets/icons/icon.ico',
   },
+  portable: {
+    useZip: true,
+  },
   linux: {
     target: ['AppImage', 'deb'],
     category: 'Graphics',
     icon: 'assets/icons/icon.png',
   },
-  asar: true,
+  asar: includeModels ? false : true,
   asarUnpack: [
     'node_modules/onnxruntime-node/**/*',
     'node_modules/sharp/**/*',

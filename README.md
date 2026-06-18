@@ -82,6 +82,8 @@ npm run smoke:viewer
 npm run dist
 ```
 
+产物默认输出到 `release/`。
+
 ### 完整离线安装包
 
 这条命令会把本地 `models/` 中的模型一起打进安装包，适合本地交付、内网分发或 U 盘拷贝。
@@ -89,6 +91,11 @@ npm run dist
 ```bash
 npm run dist:full
 ```
+
+产物默认输出到 `release-full/`，避免和轻量包互相覆盖。
+
+在 Windows 上，`dist:full` 会优先生成完整的 `win-unpacked/` 目录，并自动额外打出一个离线 `7z` 包。
+这是因为当前模型权重单文件超过 2.6 GB，NSIS/portable 这条 Windows 安装器链路会在处理该文件时失败，不适合直接生成单文件安装器。
 
 ### 仅生成 unpacked 目录
 
