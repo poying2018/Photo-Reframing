@@ -1,11 +1,15 @@
 import type {
   AppError,
+  ImageMetadata,
   InferenceResult,
   InferenceStartRequest,
   InferenceStatus,
   ModelStatus,
   OpenDialogReturnValue,
   RuntimeCapabilities,
+  ViewerWindowLayout,
+  WindowControlAction,
+  WindowState,
   WindowMode,
 } from '../../shared/types';
 
@@ -33,6 +37,8 @@ export const fileAPI = {
     window.electronAPI.openImage(),
   registerLocalFile: (filePath: string): Promise<string> =>
     window.electronAPI.registerLocalFile(filePath),
+  getImageMetadata: (filePath: string): Promise<ImageMetadata> =>
+    window.electronAPI.getImageMetadata(filePath),
   getPathForFile: (file: File): string =>
     window.electronAPI.getPathForFile(file),
   copyImageToClipboard: (imageBytes: Uint8Array | ArrayBuffer): void =>
@@ -42,6 +48,12 @@ export const fileAPI = {
 export const appAPI = {
   getVersion: (): Promise<string> =>
     window.electronAPI.getAppVersion(),
-  setWindowMode: (mode: WindowMode): Promise<void> =>
-    window.electronAPI.setWindowMode(mode),
+  getWindowState: (): Promise<WindowState> =>
+    window.electronAPI.getWindowState(),
+  setWindowMode: (payload: WindowMode | { mode: WindowMode; layout?: ViewerWindowLayout }): Promise<void> =>
+    window.electronAPI.setWindowMode(payload),
+  windowControl: (action: WindowControlAction): Promise<void> =>
+    window.electronAPI.windowControl(action),
+  onWindowStateChange: (cb: (state: WindowState) => void): (() => void) =>
+    window.electronAPI.onWindowStateChange(cb),
 };

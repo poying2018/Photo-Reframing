@@ -1,7 +1,11 @@
 import { clipboard, contextBridge, ipcRenderer, nativeImage, webUtils } from 'electron';
 import {
+  IPC_APP_GET_WINDOW_STATE,
   IPC_APP_GET_VERSION,
   IPC_APP_SET_WINDOW_MODE,
+  IPC_APP_WINDOW_STATE_CHANGED,
+  IPC_APP_WINDOW_CONTROL,
+  IPC_FILE_GET_IMAGE_METADATA,
   IPC_FILE_OPEN_IMAGE,
   IPC_FILE_REGISTER_LOCAL,
   IPC_INFERENCE_CANCEL,
@@ -10,7 +14,15 @@ import {
   IPC_MODEL_GET_STATUS,
   IPC_RUNTIME_GET_CAPABILITIES,
 } from '../shared/ipc-channels';
-import type { InferenceStartRequest, InferenceStatus, WindowMode } from '../shared/types';
+import type {
+  ImageMetadata,
+  InferenceStartRequest,
+  InferenceStatus,
+  WindowState,
+  ViewerWindowLayout,
+  WindowControlAction,
+  WindowMode,
+} from '../shared/types';
 
 const api = {
   startInference: (request: InferenceStartRequest) =>
@@ -32,6 +44,8 @@ const api = {
     ipcRenderer.invoke(IPC_FILE_OPEN_IMAGE),
   registerLocalFile: (filePath: string) =>
     ipcRenderer.invoke(IPC_FILE_REGISTER_LOCAL, filePath),
+  getImageMetadata: (filePath: string): Promise<ImageMetadata> =>
+    ipcRenderer.invoke(IPC_FILE_GET_IMAGE_METADATA, filePath),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   copyImageToClipboard: (imageBytes: Uint8Array | ArrayBuffer) => {
     const bytes = imageBytes instanceof Uint8Array ? imageBytes : new Uint8Array(imageBytes);
@@ -43,7 +57,16 @@ const api = {
   },
 
   getAppVersion: () => ipcRenderer.invoke(IPC_APP_GET_VERSION),
-  setWindowMode: (mode: WindowMode) => ipcRenderer.invoke(IPC_APP_SET_WINDOW_MODE, mode),
+  getWindowState: (): Promise<WindowState> => ipcRenderer.invoke(IPC_APP_GET_WINDOW_STATE),
+  setWindowMode: (payload: WindowMode | { mode: WindowMode; layout?: ViewerWindowLayout }) =>
+    ipcRenderer.invoke(IPC_APP_SET_WINDOW_MODE, payload),
+  windowControl: (action: WindowControlAction) =>
+    ipcRenderer.invoke(IPC_APP_WINDOW_CONTROL, action),
+  onWindowStateChange: (callback: (state: WindowState) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: WindowState) => callback(state);
+    ipcRenderer.on(IPC_APP_WINDOW_STATE_CHANGED, listener);
+    return () => ipcRenderer.removeListener(IPC_APP_WINDOW_STATE_CHANGED, listener);
+  },
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

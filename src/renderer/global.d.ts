@@ -1,11 +1,15 @@
 import type {
   AppError,
+  ImageMetadata,
   InferenceResult,
   InferenceStartRequest,
   InferenceStatus,
   ModelStatus,
   OpenDialogReturnValue,
   RuntimeCapabilities,
+  ViewerWindowLayout,
+  WindowControlAction,
+  WindowState,
   WindowMode,
 } from '../shared/types';
 
@@ -19,10 +23,14 @@ declare global {
       getModelStatus: () => Promise<ModelStatus>;
       openImage: () => Promise<OpenDialogReturnValue>;
       registerLocalFile: (filePath: string) => Promise<string>;
+      getImageMetadata: (filePath: string) => Promise<ImageMetadata>;
       getPathForFile: (file: File) => string;
       copyImageToClipboard: (imageBytes: Uint8Array | ArrayBuffer) => void;
       getAppVersion: () => Promise<string>;
-      setWindowMode: (mode: WindowMode) => Promise<void>;
+      getWindowState: () => Promise<WindowState>;
+      setWindowMode: (payload: WindowMode | { mode: WindowMode; layout?: ViewerWindowLayout }) => Promise<void>;
+      windowControl: (action: WindowControlAction) => Promise<void>;
+      onWindowStateChange: (callback: (state: WindowState) => void) => () => void;
     };
   }
 }

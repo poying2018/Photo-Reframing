@@ -1,6 +1,6 @@
 // ============================================================
 // renderer/app.ts — 前端入口
-// 初始化所有 UI 模块、事件总线、状态存储
+// 初始化 UI、状态流、推理与图像重构
 // ============================================================
 
 import { UploadUI } from './ui/upload';
@@ -8,24 +8,24 @@ import { ViewerUI } from './ui/viewer';
 import { ToolbarUI } from './ui/toolbar';
 import { ProgressUI } from './ui/progress';
 import { ResultUI } from './ui/result';
-import { StatusUI } from './ui/status';
 import { SettingsUI } from './ui/settings';
+import { EffectsUI } from './ui/effects';
+import { LiquidGlassUI } from './ui/liquid-glass';
 import { appStore } from './state/store';
 import { appEvents } from './state/events';
 import { Events } from './state/types';
-import { appAPI, inferenceAPI, modelAPI, runtimeAPI } from './api/ipc';
-import { sendToExternalAPI } from './api/external';
+import { appAPI, fileAPI, inferenceAPI } from './api/ipc';
+import { runImageReconstruction } from './api/external';
 import type { AppError } from '../shared/types';
-import type { ExternalApiConfig } from '../shared/types';
 
-// 默认外部 API 配置
-let externalApiConfig: ExternalApiConfig = {
-  url: '',
-  method: 'POST',
-  headers: {},
-  fieldName: 'image',
-};
 let pendingReferenceImageUrl: string | null = null;
+let referenceImageBlob: Blob | null = null;
+
+function waitForNextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
 
 function syncAppPhaseClass(): void {
   const app = document.getElementById('app');
@@ -33,251 +33,233 @@ function syncAppPhaseClass(): void {
 
   const phase = appStore.getState().phase;
   app.dataset.phase = phase;
-  app.classList.toggle('app-has-content', phase === 'ready' || phase === 'processing');
+  app.classList.toggle('app-has-content', phase !== 'idle');
+  app.classList.toggle('app-is-busy', phase === 'inferring' || phase === 'processing');
 }
 
-async function copyBlobToClipboard(blob: Blob): Promise<void> {
-  const copyImageToClipboard = window.electronAPI?.copyImageToClipboard;
-  if (typeof copyImageToClipboard === 'function') {
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    copyImageToClipboard(bytes);
-    return;
+async function resolveReferenceBlob(): Promise<Blob> {
+  if (referenceImageBlob) return referenceImageBlob;
+  if (!pendingReferenceImageUrl) {
+    throw new Error('没有找到原始上传图片，请返回后重新上传');
   }
 
-  const clipboardWrite = navigator.clipboard?.write;
-  const ClipboardItemCtor = window.ClipboardItem;
-  if (typeof clipboardWrite === 'function' && typeof ClipboardItemCtor === 'function') {
-    await clipboardWrite.call(navigator.clipboard, [
-      new ClipboardItemCtor({ [blob.type || 'image/png']: blob }),
-    ]);
-    return;
+  const response = await fetch(pendingReferenceImageUrl);
+  if (!response.ok) {
+    throw new Error('读取原始上传图片失败');
   }
+  referenceImageBlob = await response.blob();
+  return referenceImageBlob;
+}
 
-  throw new Error('当前窗口的剪贴板 API 不可用，请重启应用后再试');
+async function setViewerWindowMode(imagePath: string): Promise<void> {
+  try {
+    const metadata = await fileAPI.getImageMetadata(imagePath);
+    await appAPI.setWindowMode({
+      mode: 'viewer',
+      layout: { imageWidth: metadata.width, imageHeight: metadata.height },
+    });
+  } catch {
+    await appAPI.setWindowMode('viewer');
+  }
+}
+
+function emitUnknownError(message: string, err: unknown): void {
+  appEvents.emit(Events.APP_ERROR, {
+    code: 'UNKNOWN_ERROR',
+    message,
+    detail: String(err),
+  } satisfies AppError);
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // 初始化状态管理
   appStore.initialize();
   syncAppPhaseClass();
-  appStore.subscribe(() => {
-    syncAppPhaseClass();
-  });
+  appStore.subscribe(() => syncAppPhaseClass());
   void appAPI.setWindowMode('compact');
 
-  // 初始化 UI 组件
   const uploadUI = new UploadUI();
   const viewerUI = new ViewerUI();
   const toolbarUI = new ToolbarUI();
   const progressUI = new ProgressUI();
   const resultUI = new ResultUI();
-  const statusUI = new StatusUI();
   const settingsUI = new SettingsUI();
-
-  const refreshRuntimeStatus = async (): Promise<void> => {
-    try {
-      const [capabilities, modelStatus] = await Promise.all([
-        runtimeAPI.getCapabilities(),
-        modelAPI.getStatus(),
-      ]);
-      statusUI.setBackend(capabilities.preferredProviders.join(' > ').toUpperCase());
-      statusUI.setModelStatus(modelStatus.ready ? '就绪' : '缺少模型文件');
-    } catch (error) {
-      statusUI.setModelStatus('后端检查失败');
-      appEvents.emit(Events.APP_ERROR, {
-        code: 'UNKNOWN_ERROR',
-        message: '推理后端检查失败',
-        detail: String(error),
-      });
-    }
-  };
+  const effectsUI = new EffectsUI();
+  new LiquidGlassUI();
 
   inferenceAPI.onStatus((status) => {
-    if (status.backend) statusUI.setBackend(status.backend.toUpperCase());
     if (status.stage === 'failed' || status.stage === 'cancelled') {
-      progressUI.hide();
+      effectsUI.clear();
       uploadUI.setEnabled(true);
-      statusUI.setVisible(false);
-      return;
-    }
-    if (status.stage !== 'ready') {
-      progressUI.show(status.message ?? '正在推理中...');
-      progressUI.update(Math.round(status.progress ?? 0), status.message);
+      toolbarUI.setIdle();
     }
   });
 
-  // ---- 事件绑定 ----
-
-  // 图片选择 → 开始推理
   appEvents.on(Events.REFERENCE_IMAGE_READY, (url: string) => {
     pendingReferenceImageUrl = url;
   });
 
-  appEvents.on(Events.IMAGE_SELECTED, async (imagePath: string) => {
-    void appAPI.setWindowMode('viewer');
+  appEvents.on(Events.IMAGE_SELECTED, async (payload: string | { path: string; file?: File }) => {
+    const imagePath = typeof payload === 'string' ? payload : payload.path;
+    referenceImageBlob = typeof payload === 'string' ? null : payload.file ?? null;
+
     appStore.dispatch({ type: 'SET_INPUT_IMAGE', path: imagePath });
-    appStore.dispatch({ type: 'SET_PHASE', phase: 'inferring' });
+    appStore.dispatch({ type: 'CLEAR_ERROR' });
 
     resultUI.clear();
+    uploadUI.setLoading(true);
     uploadUI.setEnabled(false);
-    progressUI.show('正在推理中...');
+    toolbarUI.setProcessing();
+    await waitForNextPaint();
+    await setViewerWindowMode(imagePath);
+
+    appStore.dispatch({ type: 'SET_PHASE', phase: 'inferring' });
+    uploadUI.hide();
+    effectsUI.showPreviewUrl(pendingReferenceImageUrl);
     appEvents.emit(Events.INFERENCE_START, imagePath);
 
     try {
+      const settings = settingsUI.getSettings();
       const result = await inferenceAPI.start({
         imagePath,
-        qualityPreset: settingsUI.getSettings().qualityPreset,
-        opacityThreshold: settingsUI.getSettings().opacityThreshold,
-        maxGaussians: settingsUI.getSettings().maxGaussians,
-        focalPxOverride: settingsUI.getSettings().focalPxOverride ?? undefined,
+        qualityPreset: settings.qualityPreset,
+        opacityThreshold: settings.opacityThreshold,
+        maxGaussians: settings.maxGaussians,
+        focalPxOverride: settings.focalPxOverride ?? undefined,
       });
 
       if ('code' in result) {
-        // 错误响应
-        const err = result as AppError;
-        appEvents.emit(Events.INFERENCE_ERROR, err);
+        appEvents.emit(Events.INFERENCE_ERROR, result as AppError);
         return;
       }
 
-      // 成功
       appStore.dispatch({ type: 'SET_PLY', path: result.plyPath });
-
-      uploadUI.hide();
-      progressUI.show('正在加载高斯模型...');
-      progressUI.update(96, '正在加载高斯模型...');
-      await viewerUI.loadPly(result.plyUrl, settingsUI.getSettings());
+      await viewerUI.loadPly(result.plyUrl, settings);
       viewerUI.frameToImage(result.image);
       await viewerUI.setReferenceImage(pendingReferenceImageUrl ?? result.referenceImageUrl ?? imagePath);
       appStore.dispatch({ type: 'SET_PHASE', phase: 'ready' });
       toolbarUI.setEnabled(true);
-      statusUI.setVisible(true);
-      progressUI.hide();
-      statusUI.setInferenceTime(result.durationMs);
-      statusUI.setBackend(result.backend.toUpperCase());
-
+      effectsUI.hideBusy();
       appEvents.emit(Events.INFERENCE_COMPLETE, result);
     } catch (err) {
-      progressUI.hide();
+      effectsUI.clear();
+      uploadUI.show();
+      uploadUI.setLoading(false);
       uploadUI.setEnabled(true);
       appEvents.emit(Events.INFERENCE_ERROR, {
         code: 'INFERENCE_FAILED',
         message: '推理失败',
         detail: String(err),
-      });
+      } satisfies AppError);
     }
   });
 
-  // 推理开始
-  appEvents.on(Events.INFERENCE_START, () => {
-    progressUI.show('正在推理中...');
-  });
-
-  // 推理完成
-  appEvents.on(Events.INFERENCE_COMPLETE, (result) => {
-    progressUI.hide();
-    toolbarUI.setEnabled(true);
-    statusUI.setVisible(true);
-    statusUI.setInferenceTime(result.durationMs);
-  });
-
-  // 推理错误
   appEvents.on(Events.INFERENCE_ERROR, (err: AppError) => {
-    progressUI.hide();
+    effectsUI.clear();
+    uploadUI.show();
+    uploadUI.setLoading(false);
     uploadUI.setEnabled(true);
-    toolbarUI.setEnabled(false);
-    statusUI.setVisible(false);
+    toolbarUI.setIdle();
+    resultUI.clear();
     appStore.dispatch({ type: 'SET_PHASE', phase: 'idle' });
-    void appAPI.setWindowMode('compact');
     appStore.dispatch({ type: 'SET_ERROR', error: err });
+    void appAPI.setWindowMode('compact');
     appEvents.emit(Events.APP_ERROR, err);
   });
 
-  // 通用错误
   appEvents.on(Events.APP_ERROR, (err: AppError) => {
     appStore.dispatch({ type: 'SET_ERROR', error: err });
     console.error(`[${err.code}] ${err.message}: ${err.detail}`);
     progressUI.show(err.message);
     progressUI.update(0, err.detail);
-    window.setTimeout(() => progressUI.hide(), 5000);
+    window.setTimeout(() => progressUI.hide(), 5200);
   });
 
-  // 截图完成 → 发送至外部 API
-  appEvents.on(Events.CAPTURE_COMPLETE, async (blob: Blob) => {
-    if (!externalApiConfig.url) {
-      try {
-        await copyBlobToClipboard(blob);
-        resultUI.showResult(blob, '截图已复制到剪贴板');
-      } catch (err) {
-        resultUI.showResult(blob, '截图已生成，复制失败');
-        appEvents.emit(Events.APP_ERROR, {
-          code: 'FILE_WRITE_ERROR',
-          message: '截图复制失败',
-          detail: String(err),
-        });
-      }
+  appEvents.on(Events.RECONSTRUCTION_START, async () => {
+    const settings = settingsUI.getSettings();
+    if (!settings.kieApiKey.trim()) {
+      settingsUI.open();
+      appEvents.emit(Events.APP_ERROR, {
+        code: 'EXTERNAL_API_ERROR',
+        message: '缺少 KIE API Key',
+        detail: '请在设置中填写 KIE 密钥后再开始重构',
+      } satisfies AppError);
       return;
     }
 
-    appStore.dispatch({ type: 'SET_PHASE', phase: 'processing' });
-    progressUI.show('正在发送至外部 API...');
-
+    let capturedBlob: Blob | null = null;
     try {
-      const processedBlob = await sendToExternalAPI(blob, externalApiConfig);
-      try {
-        await copyBlobToClipboard(processedBlob);
-        resultUI.showComparison(blob, processedBlob, '处理结果已复制到剪贴板');
-      } catch {
-        resultUI.showComparison(blob, processedBlob);
-      }
+      toolbarUI.setProcessing();
+      appStore.dispatch({ type: 'SET_PHASE', phase: 'processing' });
+      resultUI.clear();
+      effectsUI.showPreviewUrl(pendingReferenceImageUrl);
+
+      capturedBlob = await viewerUI.capture();
+      const originalBlob = await resolveReferenceBlob();
+      const processedBlob = await runImageReconstruction({
+        provider: settings.reconstructionProvider,
+        apiKey: settings.kieApiKey,
+        gaussianBlob: capturedBlob,
+        referenceBlob: originalBlob,
+        resolution: settings.reconstructionResolution,
+      });
+
+      resultUI.showReconstruction(originalBlob, processedBlob);
+      toolbarUI.setResultMode();
+      effectsUI.hideBusy();
+      appStore.dispatch({ type: 'SET_PHASE', phase: 'ready' });
       appEvents.emit(Events.EXTERNAL_API_RESULT, processedBlob);
     } catch (err) {
+      effectsUI.hideBusy();
+      toolbarUI.setEnabled(true);
+      appStore.dispatch({ type: 'SET_PHASE', phase: 'ready' });
       appEvents.emit(Events.EXTERNAL_API_ERROR, {
         code: 'EXTERNAL_API_ERROR',
-        message: '外部 API 请求失败',
+        message: '图像重构失败',
         detail: String(err),
-      });
-    } finally {
-      progressUI.hide();
-      appStore.dispatch({ type: 'SET_PHASE', phase: 'ready' });
+      } satisfies AppError);
     }
   });
 
-  // 外部 API 错误
+  appEvents.on(Events.RECONSTRUCTION_COMPARE_START, () => {
+    resultUI.showOriginal();
+  });
+
+  appEvents.on(Events.RECONSTRUCTION_COMPARE_END, () => {
+    resultUI.showProcessed();
+  });
+
+  appEvents.on(Events.RECONSTRUCTION_SAVE, () => {
+    resultUI.saveProcessed();
+  });
+
   appEvents.on(Events.EXTERNAL_API_ERROR, (err: AppError) => {
     appEvents.emit(Events.APP_ERROR, err);
   });
 
-  // 重置视角
   appEvents.on('viewer:reset', () => {
     viewerUI.resetCamera();
   });
 
-  // 设置面板
   appEvents.on('settings:open', () => {
     settingsUI.open();
   });
 
-  appEvents.on(Events.UPLOAD_REQUESTED, () => {
-    appStore.dispatch({ type: 'SET_PHASE', phase: 'idle' });
+  appEvents.on(Events.RETURN_TO_UPLOAD, () => {
+    appStore.dispatch({ type: 'RESET' });
+    pendingReferenceImageUrl = null;
+    referenceImageBlob = null;
+    effectsUI.clear();
     resultUI.clear();
     uploadUI.show();
-    toolbarUI.setEnabled(false);
-    statusUI.setVisible(false);
+    uploadUI.setLoading(false);
+    uploadUI.setEnabled(true);
+    toolbarUI.setIdle();
     void appAPI.setWindowMode('compact');
-  });
-
-  settingsUI.onApply((settings) => {
-    externalApiConfig.url = settings.externalApiUrl;
-    void viewerUI.updateSettings(settings).catch((err) => {
-      appEvents.emit(Events.APP_ERROR, {
-        code: 'UNKNOWN_ERROR',
-        message: '设置应用失败',
-        detail: String(err),
-      });
-    });
   });
 
   appEvents.on(Events.MODEL_DOWNLOAD_PROGRESS, () => {});
 
-  void refreshRuntimeStatus();
+  window.addEventListener('unhandledrejection', (event) => {
+    emitUnknownError('未处理的异步错误', event.reason);
+  });
 });

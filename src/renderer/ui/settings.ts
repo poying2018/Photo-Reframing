@@ -1,10 +1,8 @@
 // ============================================================
-// renderer/ui/settings.ts — 调参设置面板
+// renderer/ui/settings.ts — 重构供应商设置面板
 // ============================================================
 
 import {
-  DEFAULT_MAX_GAUSSIANS_BALANCED,
-  DEFAULT_MAX_GAUSSIANS_HIGH,
   DEFAULT_MAX_SCREEN_SPACE_SPLAT_SIZE,
   DEFAULT_OPACITY_THRESHOLD,
   DEFAULT_POINT_CLOUD_MODE,
@@ -13,7 +11,45 @@ import {
   DEFAULT_VIEWER_BACKGROUND,
   DEFAULT_VIEWER_FOV,
 } from '../../shared/constants';
-import type { ViewerSettings } from '../../shared/types';
+import type { ReconstructionResolution, ViewerSettings } from '../../shared/types';
+import { Check, ChevronDown, X } from 'lucide';
+import { renderLucideIcon } from './lucide';
+
+const SETTINGS_STORAGE_KEY = 'sharp-viewer:reconstruction-settings';
+
+type PersistedSettings = {
+  kieApiKey?: string;
+  reconstructionResolution?: ReconstructionResolution;
+};
+
+function readPersistedSettings(): PersistedSettings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as PersistedSettings;
+    return {
+      kieApiKey: typeof parsed.kieApiKey === 'string' ? parsed.kieApiKey : undefined,
+      reconstructionResolution:
+        parsed.reconstructionResolution === '4K' || parsed.reconstructionResolution === '2K'
+          ? parsed.reconstructionResolution
+          : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function persistSettings(settings: ViewerSettings): void {
+  localStorage.setItem(
+    SETTINGS_STORAGE_KEY,
+    JSON.stringify({
+      kieApiKey: settings.kieApiKey,
+      reconstructionResolution: settings.reconstructionResolution,
+    } satisfies PersistedSettings)
+  );
+}
+
+const persisted = readPersistedSettings();
 
 export const defaultViewerSettings: ViewerSettings = {
   qualityPreset: 'full',
@@ -26,7 +62,9 @@ export const defaultViewerSettings: ViewerSettings = {
   pointCloudMode: DEFAULT_POINT_CLOUD_MODE,
   backgroundColor: DEFAULT_VIEWER_BACKGROUND,
   fov: DEFAULT_VIEWER_FOV,
-  externalApiUrl: '',
+  reconstructionProvider: 'kie',
+  kieApiKey: persisted.kieApiKey ?? '',
+  reconstructionResolution: persisted.reconstructionResolution ?? '2K',
 };
 
 type ApplyCallback = (settings: ViewerSettings) => void;
@@ -36,6 +74,7 @@ export class SettingsUI {
   private form: HTMLFormElement;
   private settings: ViewerSettings = { ...defaultViewerSettings };
   private applyCallbacks: ApplyCallback[] = [];
+  private closeTimer: number | null = null;
 
   constructor() {
     this.container = this.createContainer();
@@ -54,11 +93,30 @@ export class SettingsUI {
   }
 
   open(): void {
+    if (this.closeTimer !== null) {
+      window.clearTimeout(this.closeTimer);
+      this.closeTimer = null;
+    }
     this.container.style.display = 'block';
+    this.container.classList.remove('is-closing');
+    this.container.classList.remove('is-open');
+    void this.container.offsetWidth;
+    this.container.classList.add('is-open');
+    const input = this.form.elements.namedItem('kieApiKey');
+    if (input instanceof HTMLInputElement) {
+      window.setTimeout(() => input.focus(), 120);
+    }
   }
 
   close(): void {
-    this.container.style.display = 'none';
+    if (this.container.style.display === 'none') return;
+    this.container.classList.remove('is-open');
+    this.container.classList.add('is-closing');
+    this.closeTimer = window.setTimeout(() => {
+      this.container.style.display = 'none';
+      this.container.classList.remove('is-closing');
+      this.closeTimer = null;
+    }, 220);
   }
 
   private createContainer(): HTMLElement {
@@ -68,84 +126,52 @@ export class SettingsUI {
     el.id = 'settings-panel';
     el.innerHTML = `
       <div class="settings-backdrop" data-settings-close></div>
-      <aside class="settings-drawer" aria-label="设置">
+      <aside class="settings-drawer liquid-surface" aria-label="设置">
         <div class="settings-header">
           <div>
             <div class="settings-title">设置</div>
-            <div class="settings-subtitle">调整后可继续上传同一张图对比</div>
+            <div class="settings-subtitle">当前供应商：KIE · NanoBanana2</div>
           </div>
-          <button type="button" class="settings-close" data-settings-close title="关闭">×</button>
+          <button type="button" class="liquid-button icon-button settings-close" data-settings-close title="关闭" aria-label="关闭设置">
+            ${renderLucideIcon('x', X)}
+          </button>
         </div>
         <form id="settings-form" class="settings-form">
           <section class="settings-section">
-            <h3>推理</h3>
-            <label class="setting-row">
-              <span>质量预设</span>
-              <select name="qualityPreset">
-                <option value="balanced">Balanced · 20万</option>
-                <option value="high">High · 50万</option>
-                <option value="full">Full · 不封顶</option>
-              </select>
-            </label>
-            <label class="setting-row">
-              <span>最大高斯数</span>
-              <input name="maxGaussians" type="number" min="0" max="3000000" step="50000" />
-            </label>
-            <label class="setting-row">
-              <span>透明度阈值</span>
-              <input name="opacityThreshold" type="range" min="0" max="0.1" step="0.001" />
-              <output data-for="opacityThreshold"></output>
-            </label>
-            <label class="setting-row">
-              <span>焦距覆盖 px</span>
-              <input name="focalPxOverride" type="number" min="0" step="1" placeholder="自动" />
-            </label>
-            <p class="settings-note">推理参数在下一次上传图片时生效。</p>
-          </section>
-
-          <section class="settings-section">
-            <h3>渲染</h3>
-            <label class="setting-row">
-              <span>高斯缩放</span>
-              <input name="splatScale" type="range" min="0.01" max="1000" step="0.01" />
-              <output data-for="splatScale"></output>
-            </label>
-            <label class="setting-row">
-              <span>Alpha 裁剪</span>
-              <input name="splatAlphaRemovalThreshold" type="range" min="0" max="30" step="1" />
-              <output data-for="splatAlphaRemovalThreshold"></output>
-            </label>
-            <label class="setting-row">
-              <span>最大屏幕尺寸</span>
-              <input name="maxScreenSpaceSplatSize" type="number" min="128" max="8192" step="128" />
-            </label>
-            <label class="setting-row">
-              <span>视场角</span>
-              <input name="fov" type="range" min="25" max="100" step="1" />
-              <output data-for="fov"></output>
+            <h3>图像重构</h3>
+            <label class="setting-row setting-row-inline">
+              <span>KIE 密钥</span>
+              <input name="kieApiKey" type="password" autocomplete="off" placeholder="Bearer API Key" />
             </label>
             <label class="setting-row setting-row-inline">
-              <span>背景</span>
-              <input name="backgroundColor" type="color" />
+              <span>分辨率</span>
+              <span class="custom-select" data-resolution-select>
+                <select name="reconstructionResolution" class="native-select-hidden" aria-hidden="true" tabindex="-1">
+                  <option value="2K">2K</option>
+                  <option value="4K">4K</option>
+                </select>
+                <button type="button" class="custom-select-button" data-resolution-toggle aria-haspopup="listbox" aria-expanded="false">
+                  <span data-resolution-value>2K</span>
+                  ${renderLucideIcon('chevron-down', ChevronDown)}
+                </button>
+                <span class="custom-select-menu" data-resolution-menu role="listbox">
+                  <button type="button" class="custom-select-option is-selected" data-resolution-option="2K" role="option" aria-selected="true">
+                    <span>2K</span>
+                    ${renderLucideIcon('check', Check)}
+                  </button>
+                  <button type="button" class="custom-select-option" data-resolution-option="4K" role="option" aria-selected="false">
+                    <span>4K</span>
+                    ${renderLucideIcon('check', Check)}
+                  </button>
+                </span>
+              </span>
             </label>
-            <label class="setting-toggle">
-              <input name="pointCloudMode" type="checkbox" />
-              <span>点云模式</span>
-            </label>
-            <p class="settings-note">渲染参数会实时更新当前视图。</p>
-          </section>
-
-          <section class="settings-section">
-            <h3>输出</h3>
-            <label class="setting-row setting-row-inline">
-              <span>外部 API</span>
-              <input name="externalApiUrl" type="url" placeholder="留空则仅保存截图" />
-            </label>
+            <p class="settings-note">后续可以在这里加入更多模型和供应商；当前只启用 KIE NanoBanana2。</p>
           </section>
 
           <div class="settings-actions">
-            <button type="button" class="settings-secondary" data-settings-reset>重置默认</button>
-            <button type="submit" class="settings-primary">完成</button>
+            <button type="button" class="liquid-button settings-secondary" data-settings-reset>清空</button>
+            <button type="submit" class="liquid-button settings-primary">完成</button>
           </div>
         </form>
       </aside>
@@ -162,22 +188,15 @@ export class SettingsUI {
     this.container.querySelectorAll('[data-settings-close]').forEach((button) => {
       button.addEventListener('click', () => this.close());
     });
+    this.bindResolutionSelect();
     this.container.querySelector('[data-settings-reset]')?.addEventListener('click', () => {
-      this.settings = { ...defaultViewerSettings };
+      this.settings = {
+        ...this.settings,
+        kieApiKey: '',
+        reconstructionResolution: '2K',
+      };
       this.syncForm();
       this.emitApply();
-    });
-    const qualityPreset = this.form.elements.namedItem('qualityPreset');
-    if (qualityPreset instanceof HTMLSelectElement) qualityPreset.addEventListener('change', () => {
-      const preset = qualityPreset.value;
-      const maxInput = this.form.elements.namedItem('maxGaussians') as HTMLInputElement;
-      const opacityInput = this.form.elements.namedItem('opacityThreshold') as HTMLInputElement;
-      if (preset === 'balanced') maxInput.value = String(DEFAULT_MAX_GAUSSIANS_BALANCED);
-      if (preset === 'high') maxInput.value = String(DEFAULT_MAX_GAUSSIANS_HIGH);
-      if (preset === 'full') {
-        maxInput.value = '0';
-        opacityInput.value = '0';
-      }
     });
     this.form.addEventListener('input', () => this.syncFromForm());
     this.form.addEventListener('change', () => this.syncFromForm());
@@ -190,66 +209,74 @@ export class SettingsUI {
 
   private syncFromForm(): void {
     this.settings = this.readForm();
-    this.syncOutputs();
     this.emitApply();
   }
 
   private emitApply(): void {
+    persistSettings(this.settings);
     const next = this.getSettings();
     this.applyCallbacks.forEach((callback) => callback(next));
   }
 
   private syncForm(): void {
-    const s = this.settings;
-    (this.form.elements.namedItem('qualityPreset') as HTMLSelectElement).value = s.qualityPreset;
-    (this.form.elements.namedItem('maxGaussians') as HTMLInputElement).value = String(s.maxGaussians);
-    (this.form.elements.namedItem('opacityThreshold') as HTMLInputElement).value = String(s.opacityThreshold);
-    (this.form.elements.namedItem('focalPxOverride') as HTMLInputElement).value =
-      s.focalPxOverride === null ? '' : String(s.focalPxOverride);
-    (this.form.elements.namedItem('splatAlphaRemovalThreshold') as HTMLInputElement).value =
-      String(s.splatAlphaRemovalThreshold);
-    (this.form.elements.namedItem('splatScale') as HTMLInputElement).value = String(s.splatScale);
-    (this.form.elements.namedItem('maxScreenSpaceSplatSize') as HTMLInputElement).value =
-      String(s.maxScreenSpaceSplatSize);
-    (this.form.elements.namedItem('pointCloudMode') as HTMLInputElement).checked = s.pointCloudMode;
-    (this.form.elements.namedItem('backgroundColor') as HTMLInputElement).value = s.backgroundColor;
-    (this.form.elements.namedItem('fov') as HTMLInputElement).value = String(s.fov);
-    (this.form.elements.namedItem('externalApiUrl') as HTMLInputElement).value = s.externalApiUrl;
-    this.syncOutputs();
-  }
-
-  private syncOutputs(): void {
-    const pairs: Array<[string, string]> = [
-      ['opacityThreshold', Number((this.form.elements.namedItem('opacityThreshold') as HTMLInputElement).value).toFixed(3)],
-      ['splatScale', Number((this.form.elements.namedItem('splatScale') as HTMLInputElement).value).toFixed(2)],
-      ['splatAlphaRemovalThreshold', (this.form.elements.namedItem('splatAlphaRemovalThreshold') as HTMLInputElement).value],
-      ['fov', `${(this.form.elements.namedItem('fov') as HTMLInputElement).value}°`],
-    ];
-    pairs.forEach(([name, value]) => {
-      const output = this.form.querySelector(`output[data-for="${name}"]`);
-      if (output) output.textContent = value;
-    });
+    (this.form.elements.namedItem('kieApiKey') as HTMLInputElement).value = this.settings.kieApiKey;
+    (this.form.elements.namedItem('reconstructionResolution') as HTMLSelectElement).value =
+      this.settings.reconstructionResolution;
+    this.syncResolutionSelect();
   }
 
   private readForm(): ViewerSettings {
-    const maxGaussians = Number((this.form.elements.namedItem('maxGaussians') as HTMLInputElement).value);
-    const focalPxRaw = Number((this.form.elements.namedItem('focalPxOverride') as HTMLInputElement).value);
+    const resolution = (this.form.elements.namedItem('reconstructionResolution') as HTMLSelectElement).value;
     return {
-      qualityPreset: (this.form.elements.namedItem('qualityPreset') as HTMLSelectElement).value as ViewerSettings['qualityPreset'],
-      maxGaussians: Number.isFinite(maxGaussians) ? Math.max(0, Math.floor(maxGaussians)) : DEFAULT_MAX_GAUSSIANS_HIGH,
-      opacityThreshold: Number((this.form.elements.namedItem('opacityThreshold') as HTMLInputElement).value),
-      focalPxOverride: Number.isFinite(focalPxRaw) && focalPxRaw > 0 ? focalPxRaw : null,
-      splatAlphaRemovalThreshold: Number(
-        (this.form.elements.namedItem('splatAlphaRemovalThreshold') as HTMLInputElement).value
-      ),
-      splatScale: Number((this.form.elements.namedItem('splatScale') as HTMLInputElement).value),
-      maxScreenSpaceSplatSize: Number(
-        (this.form.elements.namedItem('maxScreenSpaceSplatSize') as HTMLInputElement).value
-      ),
-      pointCloudMode: (this.form.elements.namedItem('pointCloudMode') as HTMLInputElement).checked,
-      backgroundColor: (this.form.elements.namedItem('backgroundColor') as HTMLInputElement).value,
-      fov: Number((this.form.elements.namedItem('fov') as HTMLInputElement).value),
-      externalApiUrl: (this.form.elements.namedItem('externalApiUrl') as HTMLInputElement).value.trim(),
+      ...this.settings,
+      reconstructionProvider: 'kie',
+      kieApiKey: (this.form.elements.namedItem('kieApiKey') as HTMLInputElement).value.trim(),
+      reconstructionResolution: resolution === '4K' ? '4K' : '2K',
     };
+  }
+
+  private bindResolutionSelect(): void {
+    const root = this.container.querySelector<HTMLElement>('[data-resolution-select]');
+    const toggle = this.container.querySelector<HTMLButtonElement>('[data-resolution-toggle]');
+    const nativeSelect = this.form.elements.namedItem('reconstructionResolution') as HTMLSelectElement | null;
+    if (!root || !toggle || !nativeSelect) return;
+
+    toggle.addEventListener('click', () => {
+      const open = !root.classList.contains('is-open');
+      root.classList.toggle('is-open', open);
+      toggle.setAttribute('aria-expanded', String(open));
+    });
+
+    this.container.querySelectorAll<HTMLButtonElement>('[data-resolution-option]').forEach((option) => {
+      option.addEventListener('click', () => {
+        const value = option.dataset.resolutionOption === '4K' ? '4K' : '2K';
+        nativeSelect.value = value;
+        root.classList.remove('is-open');
+        toggle.setAttribute('aria-expanded', 'false');
+        this.syncFromForm();
+        this.syncResolutionSelect();
+      });
+    });
+
+    document.addEventListener('pointerdown', (event) => {
+      if (!this.container.classList.contains('is-open')) return;
+      if (root.contains(event.target as Node)) return;
+      root.classList.remove('is-open');
+      toggle.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  private syncResolutionSelect(): void {
+    const value = this.settings.reconstructionResolution;
+    const label = this.container.querySelector<HTMLElement>('[data-resolution-value]');
+    const nativeSelect = this.form.elements.namedItem('reconstructionResolution') as HTMLSelectElement | null;
+    if (nativeSelect) nativeSelect.value = value;
+    if (label) label.textContent = value;
+
+    this.container.querySelectorAll<HTMLButtonElement>('[data-resolution-option]').forEach((option) => {
+      const selected = option.dataset.resolutionOption === value;
+      option.classList.toggle('is-selected', selected);
+      option.setAttribute('aria-selected', String(selected));
+    });
   }
 }

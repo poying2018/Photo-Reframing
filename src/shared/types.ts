@@ -156,6 +156,14 @@ export interface ExternalApiConfig {
   fieldName: string;
 }
 
+export type ReconstructionProvider = 'kie';
+export type ReconstructionResolution = '2K' | '4K';
+export type WindowControlAction = 'minimize' | 'toggle-maximize' | 'close';
+
+export interface WindowState {
+  isMaximized: boolean;
+}
+
 export interface ViewerSettings {
   qualityPreset: QualityPreset;
   opacityThreshold: number;
@@ -167,7 +175,9 @@ export interface ViewerSettings {
   pointCloudMode: boolean;
   backgroundColor: string;
   fov: number;
-  externalApiUrl: string;
+  reconstructionProvider: ReconstructionProvider;
+  kieApiKey: string;
+  reconstructionResolution: ReconstructionResolution;
 }
 
 export interface OpenDialogOptions {
@@ -182,6 +192,11 @@ export interface OpenDialogReturnValue {
   referenceImageUrl?: string;
 }
 
+export interface ImageMetadata {
+  width: number;
+  height: number;
+}
+
 export interface PlatformInfo {
   os: string;
   arch: string;
@@ -190,3 +205,8 @@ export interface PlatformInfo {
 }
 
 export type WindowMode = 'compact' | 'viewer';
+
+export interface ViewerWindowLayout {
+  imageWidth: number;
+  imageHeight: number;
+}

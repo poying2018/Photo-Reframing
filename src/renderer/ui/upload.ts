@@ -6,12 +6,15 @@
 import { appEvents } from '../state/events';
 import { Events } from '../state/types';
 import { fileAPI } from '../api/ipc';
+import { Upload } from 'lucide';
+import { renderLucideIcon } from './lucide';
 
 export class UploadUI {
   private container: HTMLElement;
   private dropZone: HTMLElement;
   private fileInput: HTMLInputElement;
   private enabled = true;
+  private loading = false;
   private objectUrl: string | null = null;
 
   constructor() {
@@ -34,18 +37,41 @@ export class UploadUI {
   private createDropZone(): HTMLElement {
     const el = document.createElement('div');
     el.className = 'upload-dropzone';
-    el.innerHTML = `
+    el.innerHTML = this.renderIdleContent();
+    return el;
+  }
+
+  private renderIdleContent(): string {
+    return `
       <div class="upload-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" role="presentation" focusable="false">
-          <path fill="none" d="M0 0h24v24H0z" />
-          <path fill="currentColor" d="M11 16V7.85l-2.6 2.6L7 9l5-5l5 5l-1.4 1.45l-2.6-2.6V16zm-5 4q-.825 0-1.412-.587T4 18v-3h2v3h12v-3h2v3q0 .825-.587 1.413T18 20z" />
-        </svg>
+        ${renderLucideIcon('upload', Upload)}
       </div>
       <div class="upload-text">上传图片</div>
       <div class="upload-subtext">点击选择，或将图片拖入窗口</div>
       <div class="upload-meta">支持 JPG、PNG、HEIC、WEBP</div>
     `;
-    return el;
+  }
+
+  private renderLoadingContent(): string {
+    return `
+      <div class="upload-loader" aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24">
+          <path d="M0 0h24v24H0z" fill="none" />
+          <circle cx="4" cy="12" r="3" fill="currentColor">
+            <animate id="SVGKiXXedfO" attributeName="cy" begin="0;SVGgLulOGrw.end+0.25s" calcMode="spline" dur="0.6s" keySplines=".33,.66,.66,1;.33,0,.66,.33" values="12;6;12" />
+          </circle>
+          <circle cx="12" cy="12" r="3" fill="currentColor">
+            <animate attributeName="cy" begin="SVGKiXXedfO.begin+0.1s" calcMode="spline" dur="0.6s" keySplines=".33,.66,.66,1;.33,0,.66,.33" values="12;6;12" />
+          </circle>
+          <circle cx="20" cy="12" r="3" fill="currentColor">
+            <animate id="SVGgLulOGrw" attributeName="cy" begin="SVGKiXXedfO.begin+0.2s" calcMode="spline" dur="0.6s" keySplines=".33,.66,.66,1;.33,0,.66,.33" values="12;6;12" />
+          </circle>
+        </svg>
+      </div>
+      <div class="upload-text">正在准备图片</div>
+      <div class="upload-subtext">马上进入查看器</div>
+      <div class="upload-meta">请稍候，不需要重复选择</div>
+    `;
   }
 
   private createFileInput(): HTMLInputElement {
@@ -60,7 +86,7 @@ export class UploadUI {
   private bindEvents(): void {
     this.dropZone.addEventListener('click', () => {
       if (!this.enabled) return;
-      this.fileInput.click();
+      void this.openPicker();
     });
 
     this.fileInput.addEventListener('change', () => {
@@ -98,14 +124,28 @@ export class UploadUI {
     });
 
     appEvents.on(Events.UPLOAD_REQUESTED, () => {
-      this.openPicker();
+      void this.openPicker();
     });
   }
 
-  openPicker(): void {
+  async openPicker(): Promise<void> {
     this.setEnabled(true);
-    this.fileInput.value = '';
-    this.fileInput.click();
+    try {
+      const result = await fileAPI.openImage();
+      const imagePath = result.filePaths[0];
+      if (result.canceled || !imagePath) return;
+
+      this.setLoading(true);
+      this.setReferenceUrl(result.referenceImageUrl ?? imagePath);
+      appEvents.emit(Events.IMAGE_SELECTED, { path: imagePath });
+    } catch (err) {
+      this.setLoading(false);
+      appEvents.emit(Events.APP_ERROR, {
+        code: 'FILE_READ_ERROR',
+        message: '无法打开图片',
+        detail: String(err),
+      });
+    }
   }
 
   private handleFile(file: File): void {
@@ -121,11 +161,13 @@ export class UploadUI {
     }
 
     try {
+      this.setLoading(true);
       this.setReferenceObjectUrl(file);
       const imagePath = fileAPI.getPathForFile(file);
       if (imagePath) {
-        appEvents.emit(Events.IMAGE_SELECTED, imagePath);
+        appEvents.emit(Events.IMAGE_SELECTED, { path: imagePath, file });
       } else {
+        this.setLoading(false);
         appEvents.emit(Events.APP_ERROR, {
           code: 'FILE_READ_ERROR',
           message: '无法读取文件路径',
@@ -133,6 +175,7 @@ export class UploadUI {
         });
       }
     } catch (err) {
+      this.setLoading(false);
       appEvents.emit(Events.APP_ERROR, {
         code: 'FILE_READ_ERROR',
         message: '无法读取文件路径',
@@ -141,14 +184,18 @@ export class UploadUI {
     }
   }
 
-  onFileSelected(cb: (path: string) => void): void {
+  onFileSelected(cb: (payload: string | { path: string; file?: File }) => void): void {
     appEvents.on(Events.IMAGE_SELECTED, cb);
   }
 
   private setReferenceObjectUrl(file: File): void {
     if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
     this.objectUrl = URL.createObjectURL(file);
-    appEvents.emit(Events.REFERENCE_IMAGE_READY, this.objectUrl);
+    this.setReferenceUrl(this.objectUrl);
+  }
+
+  private setReferenceUrl(url: string): void {
+    appEvents.emit(Events.REFERENCE_IMAGE_READY, url);
   }
 
   private mount(): void {
@@ -168,6 +215,21 @@ export class UploadUI {
 
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
-    this.dropZone.classList.toggle('is-disabled', !enabled);
+    this.syncStateClasses();
+  }
+
+  setLoading(loading: boolean): void {
+    if (this.loading === loading) return;
+    this.loading = loading;
+    if (loading) this.enabled = false;
+    this.dropZone.innerHTML = loading ? this.renderLoadingContent() : this.renderIdleContent();
+    this.dropZone.setAttribute('aria-busy', String(loading));
+    this.syncStateClasses();
+  }
+
+  private syncStateClasses(): void {
+    this.container.classList.toggle('is-loading', this.loading);
+    this.dropZone.classList.toggle('is-loading', this.loading);
+    this.dropZone.classList.toggle('is-disabled', !this.enabled && !this.loading);
   }
 }

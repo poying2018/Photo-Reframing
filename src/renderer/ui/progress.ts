@@ -23,12 +23,10 @@ export class ProgressUI {
     const el = document.createElement('div');
     el.id = 'progress-container';
     el.innerHTML = `
-      <div class="progress-content">
-        <div class="progress-bar-track">
-          <div id="progress-bar" class="progress-bar-fill"></div>
-        </div>
-        <div id="progress-text" class="progress-text">0%</div>
+      <div class="progress-content liquid-cluster">
+        <div id="progress-text" class="progress-text"></div>
         <div id="progress-message" class="progress-message"></div>
+        <div id="progress-bar" class="progress-bar-fill" aria-hidden="true"></div>
       </div>
     `;
     return el;
@@ -40,15 +38,14 @@ export class ProgressUI {
   }
 
   show(message: string): void {
-    this.messageEl.textContent = message;
-    this.container.style.display = 'flex';
+    this.progressText.textContent = message;
+    this.messageEl.textContent = '';
+    this.container.style.display = 'block';
     this.progressBar.style.width = '0%';
-    this.progressText.textContent = '0%';
   }
 
   update(percent: number, message?: string): void {
     this.progressBar.style.width = `${percent}%`;
-    this.progressText.textContent = `${percent}%`;
     if (message) {
       this.messageEl.textContent = message;
     }

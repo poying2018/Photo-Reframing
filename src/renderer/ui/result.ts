@@ -1,21 +1,16 @@
 // ============================================================
-// renderer/ui/result.ts — 结果展示面板
-// 显示外部 API 处理后的图片结果
+// renderer/ui/result.ts — 重构结果全屏叠层
 // ============================================================
 
 export class ResultUI {
   private container: HTMLElement;
-  private comparisonContainer: HTMLElement;
-  private originalImg: HTMLImageElement;
-  private processedImg: HTMLImageElement;
-  private title: HTMLElement;
+  private image: HTMLImageElement;
+  private originalUrl: string | null = null;
+  private processedUrl: string | null = null;
 
   constructor() {
     this.container = this.createContainer();
-    this.comparisonContainer = this.container.querySelector('#comparison-view')!;
-    this.originalImg = this.container.querySelector('#result-original') as HTMLImageElement;
-    this.processedImg = this.container.querySelector('#result-processed') as HTMLImageElement;
-    this.title = this.container.querySelector('#result-title')!;
+    this.image = this.container.querySelector('#reconstruction-image') as HTMLImageElement;
     this.mount();
   }
 
@@ -24,21 +19,10 @@ export class ResultUI {
     if (existing) return existing;
     const el = document.createElement('div');
     el.id = 'result-panel';
+    el.className = 'reconstruction-result';
+    el.setAttribute('aria-hidden', 'true');
     el.innerHTML = `
-      <div class="result-header">
-        <h3 id="result-title">处理结果</h3>
-        <button id="result-close" class="result-close-btn">&times;</button>
-      </div>
-      <div id="comparison-view" class="comparison-view">
-        <div class="comparison-side">
-          <div class="comparison-label">原始截图</div>
-          <img id="result-original" class="result-image" />
-        </div>
-        <div class="comparison-side">
-          <div class="comparison-label">处理后</div>
-          <img id="result-processed" class="result-image" />
-        </div>
-      </div>
+      <img id="reconstruction-image" class="reconstruction-image" alt="重构结果" />
     `;
     return el;
   }
@@ -46,32 +30,58 @@ export class ResultUI {
   private mount(): void {
     const app = document.getElementById('app');
     if (app) app.appendChild(this.container);
-    this.container.querySelector('#result-close')?.addEventListener('click', () => {
-      this.clear();
-    });
   }
 
-  showResult(imageBlob: Blob, title = '处理结果'): void {
-    const url = URL.createObjectURL(imageBlob);
-    this.title.textContent = title;
-    this.processedImg.src = url;
-    this.comparisonContainer.classList.add('single');
-    this.container.style.display = '';
+  showReconstruction(original: Blob, processed: Blob): void {
+    this.clearObjectUrls();
+    this.originalUrl = URL.createObjectURL(original);
+    this.processedUrl = URL.createObjectURL(processed);
+    this.showProcessed();
+    this.container.classList.add('is-visible');
+    this.container.setAttribute('aria-hidden', 'false');
   }
 
-  showComparison(original: Blob, processed: Blob, title = '处理结果'): void {
-    this.title.textContent = title;
-    this.originalImg.src = URL.createObjectURL(original);
-    this.processedImg.src = URL.createObjectURL(processed);
-    this.comparisonContainer.classList.remove('single');
-    this.container.style.display = '';
+  showOriginal(): void {
+    if (!this.originalUrl) return;
+    this.image.src = this.originalUrl;
+    this.container.classList.add('is-comparing');
+  }
+
+  showProcessed(): void {
+    if (!this.processedUrl) return;
+    this.image.src = this.processedUrl;
+    this.container.classList.remove('is-comparing');
+  }
+
+  saveProcessed(): void {
+    if (!this.processedUrl) return;
+    const link = document.createElement('a');
+    link.href = this.processedUrl;
+    link.download = `sharp-viewer-reconstruction-${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+
+  showResult(imageBlob: Blob): void {
+    this.showReconstruction(imageBlob, imageBlob);
+  }
+
+  showComparison(original: Blob, processed: Blob): void {
+    this.showReconstruction(original, processed);
   }
 
   clear(): void {
-    URL.revokeObjectURL(this.originalImg.src);
-    URL.revokeObjectURL(this.processedImg.src);
-    this.originalImg.src = '';
-    this.processedImg.src = '';
-    this.container.style.display = 'none';
+    this.container.classList.remove('is-visible', 'is-comparing');
+    this.container.setAttribute('aria-hidden', 'true');
+    this.image.removeAttribute('src');
+    this.clearObjectUrls();
+  }
+
+  private clearObjectUrls(): void {
+    if (this.originalUrl) URL.revokeObjectURL(this.originalUrl);
+    if (this.processedUrl && this.processedUrl !== this.originalUrl) URL.revokeObjectURL(this.processedUrl);
+    this.originalUrl = null;
+    this.processedUrl = null;
   }
 }

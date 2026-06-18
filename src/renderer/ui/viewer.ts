@@ -17,6 +17,7 @@ import {
   DEFAULT_CAMERA_UP,
   DEFAULT_MAX_SCREEN_SPACE_SPLAT_SIZE,
   DEFAULT_SPLAT_SCALE,
+  DEFAULT_VIEWER_BACKGROUND,
   DEFAULT_VIEWER_FOV,
 } from '../../shared/constants';
 import type { InferenceImageInfo, ViewerSettings } from '../../shared/types';
@@ -72,6 +73,7 @@ export class ViewerUI {
     this.container = this.createContainer();
     this.overlayImage = this.createOverlayImage();
     this.overlayPanel = this.createOverlayPanel();
+    this.syncViewerBackground(DEFAULT_VIEWER_BACKGROUND);
     this.mount();
     this.bindEvents();
     this.syncCalibration();
@@ -89,7 +91,6 @@ export class ViewerUI {
     const app = document.getElementById('app');
     if (app) app.appendChild(this.container);
     this.container.appendChild(this.overlayImage);
-    this.container.appendChild(this.overlayPanel);
   }
 
   private initScene(): void {
@@ -117,6 +118,7 @@ export class ViewerUI {
   async loadPly(plyPath: string, settings?: Partial<RenderSettings>): Promise<void> {
     this.container.classList.add('active');
     this.initScene();
+    this.syncViewerBackground(settings?.backgroundColor ?? DEFAULT_VIEWER_BACKGROUND);
     if (settings?.backgroundColor) this.sceneManager!.setBackground(settings.backgroundColor);
     if (settings?.fov) {
       this.sceneManager!.setFov(settings.fov);
@@ -148,7 +150,10 @@ export class ViewerUI {
 
   async updateSettings(settings: Partial<RenderSettings>): Promise<void> {
     this.initScene();
-    if (settings.backgroundColor) this.sceneManager!.setBackground(settings.backgroundColor);
+    if (settings.backgroundColor) {
+      this.syncViewerBackground(settings.backgroundColor);
+      this.sceneManager!.setBackground(settings.backgroundColor);
+    }
     if (settings.fov) {
       this.sceneManager!.setFov(settings.fov);
       this.calibrationSettings.cameraFov = settings.fov;
@@ -246,116 +251,6 @@ export class ViewerUI {
   private createOverlayPanel(): HTMLElement {
     const panel = document.createElement('div');
     panel.className = 'reference-overlay-panel';
-    panel.innerHTML = `
-      <button type="button" class="reference-overlay-toggle" data-calibration-toggle>校准</button>
-      <div class="reference-overlay-controls" data-calibration-controls>
-        <section>
-          <h3>参考图</h3>
-          <label class="reference-overlay-check">
-            <input name="referenceVisible" type="checkbox" />
-            <span>显示叠加</span>
-          </label>
-          ${this.rangeControl('referenceOpacity', '透明度', 0, 1, 0.01)}
-          ${this.rangeControl('referenceScale', '缩放', 0.05, 50, 0.01)}
-          ${this.rangeControl('referenceOffsetX', '水平位移', -200, 200, 0.1)}
-          ${this.rangeControl('referenceOffsetY', '垂直位移', -200, 200, 0.1)}
-          ${this.rangeControl('referenceRotation', '旋转', -180, 180, 0.1)}
-          <label>
-            <span>适配</span>
-            <select name="referenceFitMode">
-              <option value="contain">Contain</option>
-              <option value="cover">Cover</option>
-              <option value="stretch">Stretch</option>
-            </select>
-          </label>
-        </section>
-
-        <section>
-          <h3>相机</h3>
-          ${this.numberControl('cameraPositionX', '位置 X', 0.01)}
-          ${this.numberControl('cameraPositionY', '位置 Y', 0.01)}
-          ${this.numberControl('cameraPositionZ', '位置 Z', 0.01)}
-          ${this.numberControl('cameraTargetX', '目标 X', 0.01)}
-          ${this.numberControl('cameraTargetY', '目标 Y', 0.01)}
-          ${this.numberControl('cameraTargetZ', '目标 Z', 0.01)}
-          ${this.rangeControl('cameraFov', 'FOV', 10, 120, 0.1)}
-          <button type="button" data-read-camera>读取当前视角</button>
-        </section>
-
-        <section>
-          <h3>模型</h3>
-          ${this.rangeControl('modelScale', '模型缩放', AUTO_MODEL_SCALE_MIN, AUTO_MODEL_SCALE_MAX, 0.01)}
-          ${this.numberControl('modelOffsetX', '模型 X', 0.01)}
-          ${this.numberControl('modelOffsetY', '模型 Y', 0.01)}
-          ${this.numberControl('modelOffsetZ', '模型 Z', 0.01)}
-          ${this.rangeControl('modelRotationX', '旋转 X', -360, 360, 0.1)}
-          ${this.rangeControl('modelRotationY', '旋转 Y', -360, 360, 0.1)}
-          ${this.rangeControl('modelRotationZ', '旋转 Z', -360, 360, 0.1)}
-          ${this.rangeControl('splatOpacity', '不透明度', 0, 1, 0.01)}
-          ${this.rangeControl('maxSh', 'SH 阶数', 0, 3, 1)}
-        </section>
-
-        <section>
-          <h3>Spark 渲染</h3>
-          ${this.rangeControl('maxPixelRadius', '最大半径', 1, 2048, 1)}
-          ${this.rangeControl('minPixelRadius', '最小半径', 0, 32, 0.25)}
-          ${this.rangeControl('minAlpha', 'Alpha 剔除', 0, 0.1, 0.0001)}
-          ${this.rangeControl('falloff', 'Falloff', 0.1, 4, 0.01)}
-          ${this.rangeControl('focalAdjustment', '焦距修正', 0.25, 4, 0.01)}
-        </section>
-
-        <section>
-          <h3>复制给我</h3>
-          <textarea data-calibration-json readonly spellcheck="false"></textarea>
-          <button type="button" data-copy-calibration>复制参数</button>
-          <button type="button" data-calibration-reset>重置</button>
-        </section>
-      </div>
-    `;
-
-    panel.querySelector('[data-calibration-toggle]')?.addEventListener('click', () => {
-      panel.classList.toggle('open');
-      this.syncCalibration();
-    });
-    panel.querySelector('[data-calibration-reset]')?.addEventListener('click', () => {
-      this.calibrationSettings = this.createDefaultCalibrationSettings();
-      this.autoModelOffsetCompensation.set(0, 0, 0);
-      this.syncCalibration();
-    });
-    panel.querySelector('[data-read-camera]')?.addEventListener('click', () => {
-      const camera = this.cameraController?.getCalibration();
-      if (!camera) return;
-      this.calibrationSettings = { ...this.calibrationSettings, ...camera };
-      this.syncCalibration();
-    });
-    panel.querySelector('[data-copy-calibration]')?.addEventListener('click', async () => {
-      const output = panel.querySelector<HTMLTextAreaElement>('[data-calibration-json]');
-      const copyButton = panel.querySelector<HTMLButtonElement>('[data-copy-calibration]');
-      if (!output?.value) return;
-      try {
-        await navigator.clipboard.writeText(output.value);
-      } catch {
-        output.focus();
-        output.select();
-        document.execCommand('copy');
-      }
-      if (copyButton) {
-        copyButton.textContent = '已复制';
-        window.setTimeout(() => {
-          copyButton.textContent = '复制参数';
-        }, 1200);
-      }
-    });
-    panel.addEventListener('input', (event) => {
-      this.syncPairedInput(event.target);
-      this.calibrationSettings = this.readCalibrationForm();
-      this.syncCalibration();
-    });
-    panel.addEventListener('change', (event) => {
-      this.syncPairedInput(event.target);
-      this.calibrationSettings = this.readCalibrationForm();
-      this.syncCalibration();
-    });
     return panel;
   }
 
@@ -744,6 +639,10 @@ export class ViewerUI {
   private clampFinite(value: number, min: number, max: number): number {
     if (!Number.isFinite(value)) return min;
     return Math.min(max, Math.max(min, value));
+  }
+
+  private syncViewerBackground(color: string): void {
+    document.documentElement.style.setProperty('--viewer-background', color);
   }
 
   private applyCalibration(): void {
