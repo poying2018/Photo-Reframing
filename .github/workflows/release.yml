@@ -43,26 +43,7 @@ jobs:
 
   build-and-upload:
     needs: create-release
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            asset_glob: |
-              release/*.exe
-              release/*.blockmap
-              release/latest*.yml
-          - os: macos-latest
-            asset_glob: |
-              release/*.dmg
-              release/*.zip
-              release/*.blockmap
-              release/latest-mac.yml
-          - os: ubuntu-latest
-            asset_glob: |
-              release/*.AppImage
-              release/*.deb
+    runs-on: windows-latest
 
     steps:
       - name: Checkout source
@@ -86,4 +67,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          files: ${{ matrix.asset_glob }}
+          files: |
+            release/*.exe
+            release/*.blockmap
+            release/latest*.yml
