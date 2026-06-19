@@ -2,6 +2,10 @@
   "name": "sharp-viewer",
   "version": "1.0.2",
   "description": "照片重构（Photo Reframing）- 单图转3D高斯泼溅桌面应用",
+  "author": {
+    "name": "henjicc",
+    "email": "henjicc@example.com"
+  },
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "npm run build:backend && concurrently \"npm run dev:backend\" \"electron-vite dev\"",

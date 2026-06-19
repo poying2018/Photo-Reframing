@@ -32,11 +32,12 @@ module.exports = {
     icon: 'assets/icons/icon.icns',
   },
   win: {
-    target: ['portable'],
+    target: ['nsis'],
     icon: 'assets/icons/icon.ico',
   },
-  portable: {
-    useZip: true,
+  nsis: {
+    oneClick: false,
+    allowToChangeInstallationDirectory: true,
   },
   linux: {
     target: ['AppImage', 'deb'],
