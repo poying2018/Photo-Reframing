@@ -17,6 +17,7 @@ permissions:
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   CSC_IDENTITY_AUTO_DISCOVERY: false
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   create-release:
@@ -61,6 +62,7 @@ jobs:
       - name: Build release package (Windows NSIS)
         env:
           INCLUDE_MODELS: 'false'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run dist
 
       - name: Upload Windows assets
@@ -91,6 +93,7 @@ jobs:
       - name: Build release package (macOS DMG)
         env:
           INCLUDE_MODELS: 'false'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run dist
 
       - name: Upload macOS assets
@@ -122,6 +125,7 @@ jobs:
       - name: Build release package (Linux)
         env:
           INCLUDE_MODELS: 'false'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run dist
 
       - name: Upload Linux assets
